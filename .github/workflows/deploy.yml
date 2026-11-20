@@ -33,22 +33,27 @@ jobs:
       - name: Check source and runtime configuration
         run: |
           test -f gradlew || { echo 'Merge the backend source into main before deploying.'; exit 1; }
-          test -r "$BACKEND_ENV_FILE" || { echo 'Create the backend runtime env file readable by gha-runner (see README).'; exit 1; }
+          bash scripts/prepare-runtime.sh
           docker info
-          docker compose version
-          docker compose config --quiet
+          docker compose --env-file "$BACKEND_ENV_FILE" version
+          docker compose --env-file "$BACKEND_ENV_FILE" config --quiet
 
       - name: Build backend
-        run: docker compose build --pull backend
+        run: docker compose --env-file "$BACKEND_ENV_FILE" build --pull backend
 
       - name: Deploy and wait for healthcheck
-        run: docker compose up -d --no-build --wait --wait-timeout 240 backend
+        run: docker compose --env-file "$BACKEND_ENV_FILE" up -d --no-build --wait --wait-timeout 240 backend
+
+      - name: Verify database sample
+        run: |
+          count=$(docker compose --env-file "$BACKEND_ENV_FILE" exec -T postgres psql -U dashboard -d dashboard -Atc 'SELECT count(*) FROM deployment_sample')
+          test "$count" -ge 3
 
       - name: Show deployment status
-        run: docker compose ps
+        run: docker compose --env-file "$BACKEND_ENV_FILE" ps
 
       - name: Show logs on failure
         if: failure()
         run: |
-          docker compose ps -a
-          docker compose logs --tail 100 backend
+          docker compose --env-file "$BACKEND_ENV_FILE" ps -a
+          docker compose --env-file "$BACKEND_ENV_FILE" logs --tail 100 backend postgres

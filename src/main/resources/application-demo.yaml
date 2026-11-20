@@ -1,0 +1,23 @@
+# Deployment smoke test: PostgreSQL is real; AI services are not required.
+spring:
+  flyway:
+    locations: classpath:db/migration,classpath:db/demo
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  ai:
+    model:
+      chat: none
+      embedding: none
+    vectorstore:
+      type: none
+    mcp:
+      client:
+        enabled: false
+      server:
+        enabled: false
+    chat:
+      client:
+        enabled: false
+        tool-search-advisor:
+          enabled: false
