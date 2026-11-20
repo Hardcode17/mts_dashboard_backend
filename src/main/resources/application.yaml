@@ -1,0 +1,20 @@
+spring:
+  application:
+    name: dashboard
+
+request-logging:
+  max-cached-body-size: 1MB
+  log-request-body: false
+
+logging:
+  file:
+    name: ./logs/dashboard.log
+  pattern:
+    level: "%5p [requestId=%X{requestId:--}]"
+  level:
+    root: INFO
+  logback:
+    rollingpolicy:
+      max-file-size: 100MB
+      max-history: 14
+      total-size-cap: 1GB
