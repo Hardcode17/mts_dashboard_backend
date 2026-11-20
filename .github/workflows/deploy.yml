@@ -1,0 +1,54 @@
+name: Deploy backend
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backend-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Linux, ARM64, pi-web]
+    timeout-minutes: 30
+    env:
+      COMPOSE_PROJECT_NAME: mts-dashboard-backend
+      BACKEND_PORT: ${{ vars.BACKEND_PORT || '8081' }}
+      BACKEND_ENV_FILE: ${{ vars.BACKEND_ENV_FILE || '/home/gha-runner/.config/mts-dashboard-backend/runtime.env' }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Check source and runtime configuration
+        run: |
+          test -f gradlew || { echo 'Merge the backend source into main before deploying.'; exit 1; }
+          test -r "$BACKEND_ENV_FILE" || { echo 'Create the backend runtime env file readable by gha-runner (see README).'; exit 1; }
+          docker info
+          docker compose version
+          docker compose config --quiet
+
+      - name: Build backend
+        run: docker compose build --pull backend
+
+      - name: Deploy and wait for healthcheck
+        run: docker compose up -d --no-build --wait --wait-timeout 240 backend
+
+      - name: Show deployment status
+        run: docker compose ps
+
+      - name: Show logs on failure
+        if: failure()
+        run: |
+          docker compose ps -a
+          docker compose logs --tail 100 backend
