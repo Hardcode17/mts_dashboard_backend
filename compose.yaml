@@ -37,5 +37,33 @@ services:
       retries: 8
       start_period: 60s
 
+  itsm-mock:
+    profiles: [itsm-mock]
+    build:
+      context: .
+      dockerfile: itsm-mock/Dockerfile
+    environment:
+      ITSM_MOCK_TARGET_URL: ${ITSM_MOCK_TARGET_URL:-http://backend:8080/api/integrations/itsm/batches}
+      ITSM_MOCK_TOKEN_URL: ${ITSM_MOCK_TOKEN_URL:-}
+      ITSM_MOCK_CLIENT_ID: ${ITSM_MOCK_CLIENT_ID:-}
+      ITSM_MOCK_CLIENT_SECRET: ${ITSM_MOCK_CLIENT_SECRET:-}
+      ITSM_MOCK_SOURCE_ID: ${ITSM_MOCK_SOURCE_ID:-demo-itsm}
+      ITSM_MOCK_INTERVAL: ${ITSM_MOCK_INTERVAL:-PT30S}
+      ITSM_MOCK_SCHEDULED: ${ITSM_MOCK_SCHEDULED:-true}
+      ITSM_MOCK_SEED: ${ITSM_MOCK_SEED:-53}
+      ITSM_MOCK_BATCH_SIZE: ${ITSM_MOCK_BATCH_SIZE:-12}
+      ITSM_MOCK_TIMEOUT: ${ITSM_MOCK_TIMEOUT:-PT5S}
+      ITSM_MOCK_RETRY_DELAY: ${ITSM_MOCK_RETRY_DELAY:-PT0.25S}
+      ITSM_MOCK_MAX_ATTEMPTS: ${ITSM_MOCK_MAX_ATTEMPTS:-3}
+      ITSM_MOCK_FIXTURE_FILE: ${ITSM_MOCK_FIXTURE_FILE:-}
+    volumes:
+      - itsm-mock-data:/var/lib/itsm-mock
+    ports:
+      - "127.0.0.1:${ITSM_MOCK_PORT:-8082}:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+
 volumes:
   postgres-data:
+  itsm-mock-data:
