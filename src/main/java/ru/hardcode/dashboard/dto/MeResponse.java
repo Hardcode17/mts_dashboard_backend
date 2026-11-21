@@ -10,6 +10,6 @@ public record MeResponse(
 		String username,
 		String name,
 		String email,
-		List<String> audience
+		List<String> audience, long id, String sub, String login, String displayName
 ) {
 }

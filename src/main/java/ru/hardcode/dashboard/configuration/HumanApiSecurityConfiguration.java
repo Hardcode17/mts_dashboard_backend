@@ -30,6 +30,7 @@ public class HumanApiSecurityConfiguration {
 	@Order(2)
 	public SecurityFilterChain humanApiSecurityFilterChain(
 			HttpSecurity http,
+			CoordinatorAuthorizationManager access,
 			HumanDecoder humanDecoder,
 			HumanAuthProperties properties,
 			ObjectMapper objectMapper
@@ -37,7 +38,7 @@ public class HumanApiSecurityConfiguration {
 		StrictBearerAuthenticationEntryPoint authenticationEntryPoint = new StrictBearerAuthenticationEntryPoint(
 				objectMapper, AppErrors.HUMAN_AUTH_REQUIRED, HUMAN_REALM);
 		AccessDeniedHandler accessDeniedHandler = (request, response, exception) ->
-				ApiErrorWriter.write(response, objectMapper, AppErrors.HUMAN_ACCESS_DENIED);
+				ApiErrorWriter.write(response, objectMapper, AppErrors.COORDINATOR_ACCESS_DENIED);
 
 		return http
 				.securityMatcher(properties.isRequested() ? HUMAN_API_PATH : "/api/me")
@@ -49,7 +50,7 @@ public class HumanApiSecurityConfiguration {
 						.authenticationEntryPoint(authenticationEntryPoint)
 						.accessDeniedHandler(accessDeniedHandler))
 				.authorizeHttpRequests(authorize -> authorize
-						.anyRequest().authenticated())
+						.anyRequest().access(access))
 				.oauth2ResourceServer(oauth2 -> oauth2
 						.authenticationEntryPoint(authenticationEntryPoint)
 						.accessDeniedHandler(accessDeniedHandler)

@@ -16,16 +16,19 @@ import ru.hardcode.dashboard.dto.MeResponse;
 @RestController
 @RequestMapping("/api/me")
 public class MeController {
+	private final ru.hardcode.dashboard.service.CoordinatorAccessService access;
+	public MeController(ru.hardcode.dashboard.service.CoordinatorAccessService access) { this.access = access; }
 
 	@GetMapping
-	public MeResponse me(@AuthenticationPrincipal Jwt jwt) {
+	public MeResponse me(@AuthenticationPrincipal Jwt jwt, org.springframework.security.core.Authentication authentication) {
+		var profile = access.requireActiveUser(authentication);
 		List<String> audience = jwt.getAudience();
 		return new MeResponse(
 				jwt.getSubject(),
 				jwt.getClaimAsString("preferred_username"),
 				jwt.getClaimAsString("name"),
 				jwt.getClaimAsString("email"),
-				audience == null ? List.of() : List.copyOf(audience)
+				audience == null ? List.of() : List.copyOf(audience), profile.id(), profile.identitySubject(), profile.login(), profile.displayName()
 		);
 	}
 }

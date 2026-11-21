@@ -3,6 +3,8 @@ package ru.hardcode.dashboard.exception;
 import org.springframework.http.HttpStatus;
 
 public enum AppErrors implements AppError {
+	COORDINATOR_AUTH_REQUIRED("COORDINATOR_AUTH_REQUIRED", HttpStatus.UNAUTHORIZED, "A valid user bearer token is required"),
+	COORDINATOR_ACCESS_DENIED("COORDINATOR_ACCESS_DENIED", HttpStatus.FORBIDDEN, "Coordinator access is not granted"),
 	RESOURCE_NOT_FOUND("RESOURCE_NOT_FOUND", HttpStatus.NOT_FOUND, "Resource with id ${id} not found"),
 	REQUEST_BODY_TOO_LARGE("REQUEST_BODY_TOO_LARGE", HttpStatus.CONTENT_TOO_LARGE, "Request body exceeds ${maxBytes} bytes"),
 	INVALID_REQUEST_BODY("INVALID_REQUEST_BODY", HttpStatus.BAD_REQUEST, "Request body is malformed or missing"),
