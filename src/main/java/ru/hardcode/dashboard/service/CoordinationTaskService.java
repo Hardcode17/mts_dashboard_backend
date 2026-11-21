@@ -21,19 +21,9 @@ public class CoordinationTaskService {
 		this.externalGroup = externalGroup;
 	}
 
-	/** Joins publication transaction after the incident projection has been written. */
-	public void observeEntries(String sourceId, long revision) {
-		if (externalGroup.isBlank()) {
-			return;
-		}
-		for (String incidentId : repository.enteredIncidents(sourceId, revision, externalGroup)) {
-			repository.insertOpen(incidentId);
-		}
-	}
-
-	/** Uses only full, ordered REST observations; PATCH updates never modify this baseline. */
-	public void observeHandoffs(String sourceId, long version, String snapshot, Instant observedAt) {
-		repository.observeHandoffs(sourceId, version, snapshot, externalGroup, observedAt);
+	/** Joins publication transaction; PATCH updates never modify the official baseline. */
+	public void observeHandoffs(String sourceId, long version, String snapshot, Instant observedAt, Long entryRevision) {
+		repository.observeHandoffs(sourceId, version, snapshot, externalGroup, observedAt, entryRevision);
 	}
 
 	@Transactional(readOnly = true)

@@ -22,9 +22,8 @@ the migration deliberately fails rather than silently deleting or closing user d
 KAN-85 adds ownership; this shared queue only lists tasks without an owner.
 
 The confirmed REST snapshot is processed in `ItsmSnapshotPublicationService.process`:
-after `domain.upsertDomain`, it calls `CoordinationTaskService.observeEntries` in the same
-transaction. The insertion method `CoordinationTaskRepository.insertOpen` is the shared
-entry point for creating an open task.
+after `domain.upsertDomain`, it compares the complete observation with the official REST
+assignment baseline in the same transaction. PATCH projection changes do not create entries.
 
 # Подтверждённая передача (KAN-32)
 

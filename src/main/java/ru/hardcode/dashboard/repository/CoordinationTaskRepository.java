@@ -16,7 +16,7 @@ public class CoordinationTaskRepository {
 		this.jdbc = jdbc;
 	}
 
-	/** Shared insertion point for observed entries and future official transfers (KAN-32). */
+	/** Shared insertion point for observed entries. */
 	public boolean insertOpen(String incidentId) {
 		return jdbc.update("""
 				INSERT INTO coordination_tasks (incident_id) VALUES (?)
@@ -24,23 +24,13 @@ public class CoordinationTaskRepository {
 				""", incidentId) == 1;
 	}
 
-	public List<String> enteredIncidents(String sourceId, long revision, String group) {
-		return jdbc.queryForList("""
-				SELECT incident_id FROM itsm_incident_change
-				WHERE source_id = ? AND change_revision = ?
-				  AND change_kind IN ('ADDED', 'RETURNED', 'UPDATED')
-				  AND after_data->>'assignedGroupName' = ?
-				  AND (change_kind <> 'UPDATED'
-				       OR before_data->>'assignedGroupName' IS DISTINCT FROM ?)
-				ORDER BY incident_id
-				""", String.class, sourceId, revision, group, group);
-	}
-
-	public void observeHandoffs(String sourceId, long version, String snapshot, String group, Instant observedAt) {
+	public void observeHandoffs(String sourceId, long version, String snapshot, String group, Instant observedAt,
+			Long entryRevision) {
 		Timestamp time = Timestamp.from(observedAt);
 		jdbc.update("""
 				WITH incoming AS (
-				    SELECT doc->>'id' AS id, nullif(btrim(doc->>'assignedGroupName'), '') AS team,
+				    SELECT doc->>'id' AS id,
+				           CASE WHEN btrim(doc->>'assignedGroupName') <> '' THEN doc->>'assignedGroupName' END AS team,
 				           nullif(btrim(doc->>'assignedEmployeeLogin'), '') AS login,
 				           nullif(btrim(doc->>'assignedEmployee'), '') AS employee
 				    FROM jsonb_array_elements(?::jsonb) doc
@@ -61,9 +51,25 @@ public class CoordinationTaskRepository {
 				    handoff_source_version=?, handoff_observed_at=?, handoff_type=transfers.kind
 				FROM transfers WHERE task.incident_id=transfers.id AND task.status='open'
 				""", snapshot, sourceId, group, time, time, sourceId, version, time);
+		if (entryRevision != null && !group.isBlank()) {
+			jdbc.update("""
+					INSERT INTO coordination_tasks (incident_id)
+					SELECT doc->>'id' FROM jsonb_array_elements(?::jsonb) doc
+					LEFT JOIN coordination_official_assignment old
+					  ON old.source_id=? AND old.incident_id=doc->>'id'
+					WHERE doc->>'assignedGroupName'=?
+					  AND (old.incident_id IS NULL OR old.team IS DISTINCT FROM ?
+					       OR EXISTS (SELECT 1 FROM itsm_incident_change c
+					           WHERE c.source_id=? AND c.incident_id=doc->>'id'
+					             AND c.change_revision=? AND c.change_kind='RETURNED'))
+					ORDER BY doc->>'id'
+					ON CONFLICT (incident_id) WHERE status='open' DO NOTHING
+					""", snapshot, sourceId, group, group, sourceId, entryRevision);
+		}
 		jdbc.update("""
 				INSERT INTO coordination_official_assignment(source_id, incident_id, team, login, employee)
-				SELECT ?, doc->>'id', nullif(btrim(doc->>'assignedGroupName'), ''),
+				SELECT ?, doc->>'id',
+				       CASE WHEN btrim(doc->>'assignedGroupName') <> '' THEN doc->>'assignedGroupName' END,
 				       nullif(btrim(doc->>'assignedEmployeeLogin'), ''),
 				       nullif(btrim(doc->>'assignedEmployee'), '')
 				FROM jsonb_array_elements(?::jsonb) doc
