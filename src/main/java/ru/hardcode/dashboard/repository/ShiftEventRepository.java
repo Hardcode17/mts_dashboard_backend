@@ -3,7 +3,10 @@ package ru.hardcode.dashboard.repository;
 import java.sql.PreparedStatement;
 import java.sql.Timestamp;
 import java.time.Instant;
+import java.util.Collection;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -11,7 +14,8 @@ import ru.hardcode.dashboard.service.ShiftEventReason;
 
 /**
  * Durable state of the KAN-25 shift event queue: the singleton detection cursor, the
- * per-source baseline revision and the deduplicated event rows.
+ * per-source baseline revision and the deduplicated event rows, with the KAN-29
+ * acknowledgement columns written only once per event.
  */
 @Repository
 public class ShiftEventRepository {
@@ -77,13 +81,13 @@ public class ShiftEventRepository {
 				revision, revision);
 	}
 
-	/** Queue events with {@code eventSeq > sinceEventSeq} in ascending order. */
+	/** Queue events with {@code eventSeq > sinceEventSeq} in ascending order: the remaining, not yet acknowledged rows. */
 	public List<StoredEvent> listEvents(long sinceEventSeq, int limit) {
 		return jdbc.query("""
 				SELECT id, event_id, incident_id, change_revision, source_id, reasons, ack_required,
 				       payload, created_at
 				FROM shift_event
-				WHERE id > ?
+				WHERE id > ? AND acknowledged_at IS NULL
 				ORDER BY id
 				LIMIT ?
 				""", (rs, n) -> {
@@ -99,6 +103,44 @@ public class ShiftEventRepository {
 					rs.getString("payload"),
 					rs.getObject("created_at", Timestamp.class).toInstant());
 		}, sinceEventSeq, limit);
+	}
+
+	/** Current acknowledgement state of the requested eventIds; missing ids are absent from the map. */
+	public Map<String, AckState> findAckState(Collection<String> eventIds) {
+		if (eventIds.isEmpty()) {
+			return Map.of();
+		}
+		var states = new LinkedHashMap<String, AckState>(eventIds.size());
+		jdbc.query(connection -> {
+			PreparedStatement statement = connection.prepareStatement("""
+					SELECT event_id, ack_required, acknowledged_at FROM shift_event WHERE event_id = ANY (?)
+					""");
+			statement.setArray(1, connection.createArrayOf("text", eventIds.toArray(String[]::new)));
+			return statement;
+		}, rs -> {
+			while (rs.next()) {
+				Timestamp acknowledgedAt = rs.getTimestamp("acknowledged_at");
+				states.put(rs.getString("event_id"), new AckState(rs.getBoolean("ack_required"),
+						acknowledgedAt == null ? null : acknowledgedAt.toInstant()));
+			}
+			return null;
+		});
+		return states;
+	}
+
+	/**
+	 * Stores the first acknowledgement of one event. The guard keeps the author and the time of
+	 * the first «Увидел»: a repeated request (even from another operator) updates nothing.
+	 */
+	public void ackEvent(String eventId, long actorUserId, Instant acknowledgedAt) {
+		jdbc.update("""
+				UPDATE shift_event SET acknowledged_by = ?, acknowledged_at = ?
+				WHERE event_id = ? AND acknowledged_at IS NULL
+				""", actorUserId, Timestamp.from(acknowledgedAt), eventId);
+	}
+
+	/** Acknowledgement state of one event row, read for validation only. */
+	public record AckState(boolean ackRequired, Instant acknowledgedAt) {
 	}
 
 	/** One stored queue event; {@code payload} stays the raw JSONB document of the notification data. */
