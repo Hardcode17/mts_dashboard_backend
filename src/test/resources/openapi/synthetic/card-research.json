@@ -7,6 +7,7 @@
   "service": "checkout-api",
   "serviceType": "Клиентский",
   "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов",
+  "assignedEmployee": "Тестовый исполнитель",
   "stateEnum": "Research",
   "stateReason": "решено",
   "priorityId": 3,
@@ -15,6 +16,10 @@
   "deadline": "2026-11-20T20:00:00Z",
   "completionDate": "2026-11-20T19:40:00Z",
   "solution": "Перезапущен пул соединений БД",
+  "remainingSeconds": null,
+  "overdue": false,
+  "itsmUrl": "http://127.0.0.1:8082/api/mock/incidents/INC000021095539",
+  "itsmDemo": true,
   "groupMemberships": [
     {
       "group": "coordinator",

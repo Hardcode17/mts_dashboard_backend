@@ -7,6 +7,7 @@
   "service": "checkout-api",
   "serviceType": "Клиентский",
   "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов",
+  "assignedEmployee": null,
   "stateEnum": "WorkInProgress",
   "stateReason": null,
   "priorityId": 4,
@@ -15,6 +16,10 @@
   "deadline": null,
   "completionDate": null,
   "solution": null,
+  "remainingSeconds": null,
+  "overdue": false,
+  "itsmUrl": "http://127.0.0.1:8082/api/mock/incidents/INC000021095532",
+  "itsmDemo": true,
   "groupMemberships": [
     {
       "group": "coordinator",

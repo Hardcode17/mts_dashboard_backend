@@ -6,7 +6,8 @@ info:
     Канонический контракт чтений дашборда для KAN-7: список и группы инцидентов,
     карточка, статус источника, polling по `eventSeq` и подтверждение точного набора `eventId`.
     Согласован в KAN-20 с приёмом снимков (`itsm-ingest.openapi.yaml`, KAN-27/KAN-53).
-    Контроллеров этих чтений пока нет: публикуются **примеры**, а не работающие маршруты.
+    Список и карточка читаются из опубликованных снимков. Для статуса источника, polling и
+    подтверждений в этой спецификации пока приведены только примеры.
     Примеры синтетические (INC `INC0000210955xx` не пересекаются с реальной выгрузкой),
     валидируются схемами и пригодны фронту до готовности БД.
 
@@ -34,11 +35,13 @@ info:
     - **`revision`** — опубликованная ревизия изменений, то же значение, что в
       `GET /api/snapshot/status`. «Снимок revision 42» означает, что блок ответа построен ровно
       из этой публикации.
-    - **`eventSeq`** — счётчик изменений опубликованных данных, версия блока статуса. Его
-      возвращают все чтения, в том числе `404`.
+    - **`eventSeq`** — счётчик публикаций, версия блока статуса. Список и карточка
+      берут его из подтверждённых публикаций (в том числе без изменений содержимого);
+      при приёме пакета без публикации счётчик не меняется. Его возвращают все чтения,
+      в том числе `404`.
     - **`sourceVersion`** вида `X-Source-Version` — версия доставки отправителя. Не `revision`
-      и не `eventSeq`: `202` не публикует данные, а несколько версий между опросами
-      сворачиваются в одно изменение `eventSeq`.
+      и не `eventSeq`: `202` не публикует данные, а несколько версий доставки между
+      опросами сворачиваются в одну публикацию с новым `eventSeq`.
 
     ## polling и ack
 
@@ -68,15 +71,17 @@ info:
 
     ## Чтения и авторизация
 
-    Оператор (интерфейс координатора) — сессия `cookieAuth`; машинный мониторинг источников —
+    Список и карточка используют человеческий Bearer JWT (KAN-16), если он настроен;
+    иначе действуют локальные форма входа и HTTP Basic. Машинный мониторинг источников —
     `machineBearer` (предлагается). В KAN-27 машинная цепочка с правом импорта действует
     только на `/api/integrations/itsm/**`.
 
     ## Ошибки
 
     JSON-ошибки — `ErrorResponse` (`code`, `message`), как во всём приложении. Развёрнутая
-    цепочка UI для неаутентифицированного браузера отвечает редиректом формы (`302`); API-клиент
-    с `Accept: application/json` получает `401 AUTH_REQUIRED`. Машинный Bearer без прав —
+    локальная цепочка UI для неаутентифицированного браузера отвечает редиректом формы (`302`);
+    клиент с `Accept: application/json` получает `401 AUTH_REQUIRED`. При настроенном человеческом
+    Bearer JWT отсутствие допустимого токена также даёт `401 AUTH_REQUIRED`. Машинный Bearer без прав —
     `401 MACHINE_AUTH_REQUIRED` с `WWW-Authenticate: Bearer`.
 
 security:
@@ -88,11 +93,20 @@ paths:
       operationId: listIncidents
       summary: Список инцидентов и групп (KAN-7)
       description: |
-        Единственный маршрут списка. `group` повторяется; без него — активные
-        инциденты с группами. `includeCompleted=false` скрывает завершённые (`Resolved`, `Closed`,
-        `Research`) строки, но группа «Исследование ситуации» остаётся. P4, назначенный
-        координаторам, входит одновременно в `critical` и `coordinator`: объект в `items` один,
-        `groupMemberships` перечисляет все группы.
+        Единственный маршрут списка. Без `group` — все опубликованные `Assigned` и
+        `WorkInProgress`, а также `Research`: он остаётся видимым в своей группе. С `group`
+        (параметр повторяется) `items` содержит объединение выбранных групп без дублей.
+        `includeCompleted=false` скрывает `Resolved` и `Closed`, но не `Research`. P4 на координаторах входит
+        одновременно в `critical` и `coordinator`; `groupMemberships` всегда содержит все группы INC.
+        Порядок: по `updatedAt` (если передан), иначе по времени последнего изменения на публикации,
+        а для исходной карточки — по наиболее поздней дате регистрации, назначения или устранения.
+        При равном времени — по строковому `id` по возрастанию. На первой странице счётчики
+        выбранных групп относятся ко всей выборке, а `incidents` — только к этой странице;
+        невыбранные группы пусты. На следующих страницах `groups` пуст.
+      security:
+        - humanBearer: []
+        - cookieAuth: []
+        - localBasic: []
       parameters:
         - name: group
           in: query
@@ -111,7 +125,7 @@ paths:
         - name: cursor
           in: query
           required: false
-          description: 'Непрозрачный курсор из предыдущего `nextCursor`; без курсора — первая страница.'
+          description: 'Непрозрачный курсор из предыдущего `nextCursor`, действует для той же публикации и параметров. Без курсора — первая страница; после `INVALID_CURSOR` начните с неё.'
           schema:
             type: string
         - name: limit
@@ -137,7 +151,7 @@ paths:
           description: Страница инцидентов с группами.
           headers:
             ETag:
-              description: '`eventSeq` страницы; `If-None-Match` с ним даёт `304` без тела.'
+              description: 'ETag на основе `eventSeq` и параметров представления; верните его в `If-None-Match` для проверки на `304`.'
               schema:
                 type: string
           content:
@@ -186,24 +200,6 @@ paths:
                               - group: critical
                                 matchedRule: priorityId = 4
                         fixed: null
-                      - key: high
-                        title: Высокий приоритет
-                        rule: Активный инцидент с priorityId = 3
-                        active: true
-                        incidentCount: 1
-                        incidents:
-                          - id: INC000021095538
-                            productName: Оплата заказов
-                            assignedGroupName: Оплата
-                            stateEnum: WorkInProgress
-                            priorityId: 3
-                            submitDate: '2026-11-21T09:03:00Z'
-                            deadline: '2026-11-24T18:00:00Z'
-                            completionDate: null
-                            groupMemberships:
-                              - group: high
-                                matchedRule: priorityId = 3
-                        fixed: null
                       - key: coordinator
                         title: На координаторах
                         rule: 'Активный инцидент или Research, назначенный на координаторов'
@@ -249,6 +245,24 @@ paths:
                                 matchedRule: assignedToCoordinators
                               - group: research
                                 matchedRule: stateEnum = Research
+                        fixed: null
+                      - key: high
+                        title: Высокий приоритет
+                        rule: Активный инцидент с priorityId = 3
+                        active: true
+                        incidentCount: 1
+                        incidents:
+                          - id: INC000021095538
+                            productName: Оплата заказов
+                            assignedGroupName: Оплата
+                            stateEnum: WorkInProgress
+                            priorityId: 3
+                            submitDate: '2026-11-21T09:03:00Z'
+                            deadline: '2026-11-24T18:00:00Z'
+                            completionDate: null
+                            groupMemberships:
+                              - group: high
+                                matchedRule: priorityId = 3
                         fixed: null
                       - key: research
                         title: Исследование ситуации
@@ -363,16 +377,16 @@ paths:
                               - group: critical
                                 matchedRule: priorityId = 4
                         fixed: null
-                      - key: high
-                        title: Высокий приоритет
-                        rule: Активный инцидент с priorityId = 3
+                      - key: coordinator
+                        title: На координаторах
+                        rule: 'Активный инцидент или Research, назначенный на координаторов'
                         active: true
                         incidentCount: 0
                         incidents: []
                         fixed: null
-                      - key: coordinator
-                        title: На координаторах
-                        rule: 'Активный инцидент или Research, назначенный на координаторов'
+                      - key: high
+                        title: Высокий приоритет
+                        rule: Активный инцидент с priorityId = 3
                         active: true
                         incidentCount: 0
                         incidents: []
@@ -427,16 +441,16 @@ paths:
                         incidentCount: 0
                         incidents: []
                         fixed: null
-                      - key: high
-                        title: Высокий приоритет
-                        rule: Активный инцидент с priorityId = 3
+                      - key: coordinator
+                        title: На координаторах
+                        rule: 'Активный инцидент или Research, назначенный на координаторов'
                         active: true
                         incidentCount: 0
                         incidents: []
                         fixed: null
-                      - key: coordinator
-                        title: На координаторах
-                        rule: 'Активный инцидент или Research, назначенный на координаторов'
+                      - key: high
+                        title: Высокий приоритет
+                        rule: Активный инцидент с priorityId = 3
                         active: true
                         incidentCount: 0
                         incidents: []
@@ -489,8 +503,8 @@ paths:
                   summary: 'Строковый идентификатор, пустой срок для INC без срока'
                   value: |
                     incidentId,priorityId,stateEnum,deadline,groups
-                    INC000021095531,4,Assigned,2026-11-21T12:00:00Z,critical;coordinator
-                    INC000021095532,4,WorkInProgress,,critical;coordinator
+                    INC000021095531,4,Assigned,2026-11-21T12:00:00Z,coordinator;critical
+                    INC000021095532,4,WorkInProgress,,coordinator;critical
                     INC000021095538,3,WorkInProgress,2026-11-24T18:00:00Z,high
         '304':
           description: 'Не изменилось с указанного `If-None-Match`.'
@@ -507,12 +521,15 @@ paths:
               examples:
                 invalidGroup:
                   summary: Неизвестная группа
-                  value: {"code": "INVALID_GROUP", "message": "Unknown dashboard group ${group}"}
+                  value: {"code": "INVALID_GROUP", "message": "Unknown dashboard group current"}
                 invalidCursor:
                   summary: Непрозрачный курсор повреждён
                   value: {"code": "INVALID_CURSOR", "message": "cursor is not a valid list cursor"}
+                invalidLimit:
+                  summary: Размер страницы вне допустимого диапазона
+                  value: {"code": "INVALID_LIMIT", "message": "limit must be between 1 and 100"}
         '401':
-          description: Нет допустимой сессии или токена.
+          description: Нет допустимой сессии или человеческого токена.
           headers:
             WWW-Authenticate:
               required: false
@@ -526,9 +543,6 @@ paths:
                 cookieAuthRequired:
                   summary: Нет сессии интерфейса
                   value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
-                machineAuthRequired:
-                  summary: Нет или невалиден машинный Bearer
-                  value: {"code": "MACHINE_AUTH_REQUIRED", "message": "Machine bearer token is required"}
         '403':
           description: Токен или сессия без нужного права.
           content:
@@ -536,9 +550,9 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
               examples:
-                machineAccessDenied:
-                  summary: Машинный клиент без права чтения
-                  value: {"code": "MACHINE_ACCESS_DENIED", "message": "Machine client is not allowed to read the dashboard"}
+                humanAccessDenied:
+                  summary: Нет права доступа
+                  value: {"code": "HUMAN_ACCESS_DENIED", "message": "The access token does not grant access to this resource"}
   '/api/dashboard/incidents/{incidentId}':
     get:
       operationId: getIncidentCard
@@ -547,7 +561,13 @@ paths:
         Полная карточка. `deadline` — `null`, если срока нет (нет поля, `null` или
         техническое `0001-01-01T00:00:00Z` в снимке). `completionDate` и `solution` — `null` у
         активных и заполнены у завершённых. Ответ всегда несёт `eventSeq` и `revision` публикации,
-        из которой он построен.
+        из которой он построен. `itsmUrl` открывает ровно этот INC во внешней системе
+        (или демоцель при `itsmDemo=true`). GET не меняет назначение, версию и историю и
+        не выполняет запрос по ссылке.
+      security:
+        - humanBearer: []
+        - cookieAuth: []
+        - localBasic: []
       parameters:
         - name: incidentId
           in: path
@@ -580,6 +600,7 @@ paths:
                     service: checkout-api
                     serviceType: Клиентский
                     assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                    assignedEmployee: null
                     stateEnum: WorkInProgress
                     stateReason: null
                     priorityId: 4
@@ -588,6 +609,10 @@ paths:
                     deadline: null
                     completionDate: null
                     solution: null
+                    remainingSeconds: null
+                    overdue: false
+                    itsmUrl: 'http://127.0.0.1:8082/api/mock/incidents/INC000021095532'
+                    itsmDemo: true
                     groupMemberships:
                       - group: coordinator
                         matchedRule: assignedToCoordinators
@@ -607,6 +632,7 @@ paths:
                     service: checkout-api
                     serviceType: Клиентский
                     assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                    assignedEmployee: Тестовый исполнитель
                     stateEnum: Research
                     stateReason: решено
                     priorityId: 3
@@ -615,6 +641,10 @@ paths:
                     deadline: '2026-11-20T20:00:00Z'
                     completionDate: '2026-11-20T19:40:00Z'
                     solution: Перезапущен пул соединений БД
+                    remainingSeconds: null
+                    overdue: false
+                    itsmUrl: 'http://127.0.0.1:8082/api/mock/incidents/INC000021095539'
+                    itsmDemo: true
                     groupMemberships:
                       - group: coordinator
                         matchedRule: assignedToCoordinators
@@ -634,6 +664,7 @@ paths:
                     service: checkout-api
                     serviceType: Клиентский
                     assignedGroupName: Онлайн-магазин
+                    assignedEmployee: null
                     stateEnum: Closed
                     stateReason: решено
                     priorityId: 2
@@ -642,9 +673,11 @@ paths:
                     deadline: '2026-11-19T18:00:00Z'
                     completionDate: '2026-11-19T16:30:00Z'
                     solution: Откатан релиз виджета
-                    groupMemberships:
-                      - group: critical
-                        matchedRule: priorityId = 4
+                    remainingSeconds: null
+                    overdue: false
+                    itsmUrl: 'http://127.0.0.1:8082/api/mock/incidents/INC000021095537'
+                    itsmDemo: true
+                    groupMemberships: []
                     eventSeq: 43
                     revision: 42
         '400':
@@ -934,6 +967,15 @@ paths:
                   value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
 components:
   securitySchemes:
+    humanBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: 'Токен оператора Keycloak (KAN-16); токен импорта не подходит.'
+    localBasic:
+      type: http
+      scheme: basic
+      description: 'Локальный доступ, если человеческий JWT не настроен.'
     cookieAuth:
       type: apiKey
       in: cookie
@@ -962,7 +1004,7 @@ components:
       format: int64
       minimum: 0
       maximum: 9223372036854775807
-      description: 'Счётчик изменений опубликованных данных. Версия блока статуса, не снимка.'
+      description: 'Счётчик публикаций, версия блока статуса. Растёт на каждой применённой публикации, даже если состав INC не изменился.'
     PublishedRevision:
       type: integer
       format: int64
@@ -972,8 +1014,8 @@ components:
       type: string
       enum:
         - critical
-        - high
         - coordinator
+        - high
         - research
       description: |
         `critical` — активный P4; `high` — активный P3; `coordinator` — активный или
@@ -1024,8 +1066,8 @@ components:
           $ref: '#/components/schemas/ItsmIncidentState'
         priorityId:
           type: integer
-          minimum: 1
-          maximum: 4
+          format: int32
+          description: 'Исходный приоритет ITSM. Только P4 и P3 влияют на группы `critical` и `high`.'
         submitDate:
           $ref: '#/components/schemas/UtcInstant'
         deadline:
@@ -1052,6 +1094,11 @@ components:
         - priorityId
         - submitDate
         - deadline
+        - assignedEmployee
+        - remainingSeconds
+        - overdue
+        - itsmUrl
+        - itsmDemo
         - groupMemberships
         - eventSeq
         - revision
@@ -1086,6 +1133,11 @@ components:
           type:
             - string
             - 'null'
+        assignedEmployee:
+          type:
+            - string
+            - 'null'
+          description: 'Официальный исполнитель по данным ITSM, не внутреннее назначение дашборда.'
         stateEnum:
           $ref: '#/components/schemas/ItsmIncidentState'
         stateReason:
@@ -1094,8 +1146,8 @@ components:
             - 'null'
         priorityId:
           type: integer
-          minimum: 1
-          maximum: 4
+          format: int32
+          description: 'Исходный приоритет ITSM без подмены.'
         submitDate:
           $ref: '#/components/schemas/UtcInstant'
         lastAssignmentToTeamDateTime:
@@ -1117,6 +1169,22 @@ components:
             - string
             - 'null'
           description: 'Только у завершённых; у активных — `null`.'
+        remainingSeconds:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: 'Срок минус серверное время, в секундах с округлением вниз. Без срока и вне Assigned/WorkInProgress — `null`.'
+        overdue:
+          type: boolean
+          description: 'Только для Assigned/WorkInProgress со сроком, когда серверное время строго больше срока. Ровно в срок — `false`.'
+        itsmUrl:
+          type: string
+          format: uri
+          description: 'Абсолютный HTTP(S) URL этого INC в ITSM; не productUrl.'
+        itsmDemo:
+          type: boolean
+          description: 'Показывать явную пометку демоцели, если `true`.'
         groupMemberships:
           type: array
           items:

@@ -7,6 +7,7 @@
   "service": "checkout-api",
   "serviceType": "Клиентский",
   "assignedGroupName": "Онлайн-магазин",
+  "assignedEmployee": null,
   "stateEnum": "Closed",
   "stateReason": "решено",
   "priorityId": 2,
@@ -15,12 +16,11 @@
   "deadline": "2026-11-19T18:00:00Z",
   "completionDate": "2026-11-19T16:30:00Z",
   "solution": "Откатан релиз виджета",
-  "groupMemberships": [
-    {
-      "group": "critical",
-      "matchedRule": "priorityId = 4"
-    }
-  ],
+  "remainingSeconds": null,
+  "overdue": false,
+  "itsmUrl": "http://127.0.0.1:8082/api/mock/incidents/INC000021095537",
+  "itsmDemo": true,
+  "groupMemberships": [],
   "eventSeq": 43,
   "revision": 42
 }
