@@ -211,7 +211,7 @@ public class ItsmBatchIntakeService {
 		}
 	}
 
-	private static String sha256(byte[] payload) {
+	static String sha256(byte[] payload) {
 		try {
 			MessageDigest digest = MessageDigest.getInstance("SHA-256");
 			return HexFormat.of().formatHex(digest.digest(payload));
