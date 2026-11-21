@@ -13,6 +13,7 @@ import ru.hardcode.dashboard.dto.DeadlineRiskResponse;
 import ru.hardcode.dashboard.repository.DashboardIncidentRepository.IncidentSummary;
 import ru.hardcode.dashboard.repository.DeadlineRiskRepository;
 import ru.hardcode.dashboard.repository.DeadlineRiskRepository.ActiveIncident;
+import ru.hardcode.dashboard.repository.DeadlineRiskRepository.MedianSegment;
 import ru.hardcode.dashboard.repository.DeadlineRiskRepository.ResolutionMedians;
 import ru.hardcode.dashboard.repository.DeadlineRiskRepository.ScoredRisk;
 import ru.hardcode.dashboard.repository.DeadlineRiskRepository.StoredRisk;
@@ -55,7 +56,7 @@ public class DeadlineRiskService {
 		var scored = new ArrayList<ScoredRisk>();
 		for (ActiveIncident incident : repository.findActiveWithDeadline()) {
 			var result = scorer.evaluate(new DeadlineRiskInput(incident.assignedGroupName(), incident.deadline(),
-					now, medianFor(medians, incident.assignedGroupName(), incident.priorityId()),
+					now, medianFor(medians, incident.assignedGroupName(), incident.serviceId(), incident.priorityId()),
 					incident.deadlineExtensions(), incident.reassignments(), incident.reopenings(),
 					Duration.between(incident.lastStatusChange(), now), incident.assigneeOpenIncidents(),
 					incident.priorityId()));
@@ -101,9 +102,15 @@ public class DeadlineRiskService {
 				List.of(new DeadlineRiskResponse.Reason(code, text)), null);
 	}
 
-	private static Double medianFor(ResolutionMedians medians, String group, int priority) {
+	private static Double medianFor(ResolutionMedians medians, String group, Long serviceId, int priority) {
 		if (group == null) {
 			return null;
+		}
+		if (serviceId != null) {
+			Double exact = medians.bySegment().get(new MedianSegment(serviceId, group, priority));
+			if (exact != null && exact > 0) {
+				return exact;
+			}
 		}
 		var byPriority = medians.byGroupAndPriority().get(group);
 		Double scoped = byPriority == null ? null : byPriority.get(priority);

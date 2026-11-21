@@ -11,7 +11,8 @@ import java.time.Instant;
  * @param deadline               the ITSM deadline, {@code null} when the card has none
  * @param evaluatedAt            the moment of this assessment
  * @param medianResolutionHours median resolution time of completed incidents of the group
- *                               (group × priority first, group-wide fallback), {@code null} or
+ *                               (service × group × priority first, then group × priority and
+ *                               group-wide fallbacks), {@code null} or
  *                               non-positive when there is no usable history
  * @param deadlineExtensions     how often the deadline changed before this assessment
  * @param reassignments          how often the group or assignee changed before this assessment

@@ -29,6 +29,25 @@ class DeadlineRiskIT extends DashboardIncidentTestSupport {
 	@Autowired DeadlineRiskRepository riskRepository;
 
 	@Test
+	void usesServicePriorityAndGroupMedianBeforeBroaderHistory() throws Exception {
+		publish(receive(1, "[" + String.join(",",
+				withService(completed("INC0000100011", "2026-11-20T08:00:00Z", "2026-11-20T10:00:00Z"), "A"),
+				withService(completed("INC0000100012", "2026-11-20T08:00:00Z", "2026-11-20T18:00:00Z"), "B"),
+				withService(active("INC0000100013", "2026-11-21T13:02:29Z"), "A"),
+				withService(active("INC0000100014", "2026-11-21T13:02:29Z"), "B")) + "]"));
+
+		mvc.perform(authenticatedGet(PATH + "/{id}", "INC0000100013"))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.deadlineRisk.score").value(2.0));
+		mvc.perform(authenticatedGet(PATH + "/{id}", "INC0000100014"))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.deadlineRisk.score").value(10.0));
+	}
+
+	private static String withService(String incident, String service) {
+		return incident.replace("\"productName\":\"Test product\"",
+				"\"productName\":\"Test product\",\"service\":\"" + service + "\"");
+	}
+
+	@Test
 	void countsOnlyExtensionsAndDetectsAssigneeNameChanges() {
 		publish(receive(1, "[" + activeWithAssignee("2026-11-21T15:02:29Z", "Alice") + "]"));
 		publish(receive(2, "[" + activeWithAssignee("2026-11-21T14:02:29Z", "Bob") + "]"));

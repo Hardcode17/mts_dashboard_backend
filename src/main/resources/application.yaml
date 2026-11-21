@@ -36,7 +36,8 @@ deadline-risk:
   # KAN-82 model constants. PLACEHOLDER values: real coefficients and thresholds come from the
   # offline KAN-81 training (UCI ServiceNow) and replace these numbers as a single config edit —
   # the code never changes between trainings.
-  # score = w0 + w1*x1 + … + w7*x7 with x1 = group median resolution hours / hours left until
+  # score = w0 + w1*x1 + … + w7*x7 with x1 = service × priority × group median resolution hours
+  # (falling back to group × priority, then group when history is missing) / hours left until
   # the deadline, x2 = deadline extensions, x3 = reassignments, x4 = reopenings,
   # x5 = hours without a status change, x6 = assignee's open incidents, x7 = priorityId (1-4).
   weights:

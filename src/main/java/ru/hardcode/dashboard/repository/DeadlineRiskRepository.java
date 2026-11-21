@@ -31,8 +31,8 @@ public class DeadlineRiskRepository {
 	}
 
 	/**
-	 * Median resolution time of completed published incidents, in hours. Group × priority is the
-	 * primary scope, the group-wide median is the fallback when a priority has no history.
+	 * Median resolution time of completed published incidents, in hours. Service × priority ×
+	 * group is the primary scope; group × priority and then group are sparse-history fallbacks.
 	 * Incidents completed before registration are excluded.
 	 */
 	public ResolutionMedians findResolutionMedians() {
@@ -46,6 +46,13 @@ public class DeadlineRiskRepository {
 				    AND incident.completion_date IS NOT NULL
 				    AND incident.completion_date > incident.submit_date
 				""";
+		Map<MedianSegment, Double> bySegment = new java.util.HashMap<>();
+		jdbc.sql("SELECT incident.service_id, team.group_name, incident.priority_id, " + MEDIAN_EXPRESSION
+				+ " " + from + " AND incident.service_id IS NOT NULL"
+				+ " GROUP BY incident.service_id, team.group_name, incident.priority_id")
+				.query((rs, row) -> bySegment.put(new MedianSegment(rs.getLong("service_id"),
+						rs.getString("group_name"), rs.getInt("priority_id")), rs.getDouble("median_hours")))
+				.list();
 		Map<String, Map<Integer, Double>> byGroupAndPriority = new java.util.HashMap<>();
 		jdbc.sql("SELECT team.group_name, incident.priority_id, " + MEDIAN_EXPRESSION + " " + from
 				+ " GROUP BY team.group_name, incident.priority_id ORDER BY team.group_name, incident.priority_id")
@@ -58,7 +65,7 @@ public class DeadlineRiskRepository {
 				+ " GROUP BY team.group_name ORDER BY team.group_name")
 				.query((rs, row) -> byGroup.put(rs.getString("group_name"), rs.getDouble("median_hours")))
 				.list();
-		return new ResolutionMedians(byGroupAndPriority, byGroup);
+		return new ResolutionMedians(bySegment, byGroupAndPriority, byGroup);
 	}
 
 	private static final String MEDIAN_EXPRESSION = """
@@ -70,7 +77,7 @@ public class DeadlineRiskRepository {
 	/** Active published incidents with a deadline and their KAN-82 feature values. */
 	public List<ActiveIncident> findActiveWithDeadline() {
 		return jdbc.sql("""
-				SELECT incident.id, team.group_name, incident.priority_id, incident.deadline,
+				SELECT incident.id, team.group_name, incident.service_id, incident.priority_id, incident.deadline,
 				       (SELECT count(*) FROM itsm_incident_change AS change
 				         WHERE change.source_id = incident.source_id AND change.incident_id = incident.id
 				           AND change.before_data IS NOT NULL AND change.after_data IS NOT NULL
@@ -113,6 +120,7 @@ public class DeadlineRiskRepository {
 				ORDER BY incident.id
 				""")
 				.query((rs, row) -> new ActiveIncident(rs.getString("id"), rs.getString("group_name"),
+						rs.getObject("service_id", Long.class),
 						rs.getInt("priority_id"), instant(rs, "deadline"), rs.getLong("deadline_extensions"),
 						rs.getLong("reassignments"), rs.getLong("reopenings"), instant(rs, "last_status_change"),
 						rs.getLong("assignee_open_incidents")))
@@ -152,12 +160,16 @@ public class DeadlineRiskRepository {
 		return value == null ? null : value.toInstant();
 	}
 
-	public record ResolutionMedians(Map<String, Map<Integer, Double>> byGroupAndPriority,
+	public record MedianSegment(long serviceId, String group, int priority) {
+	}
+
+	public record ResolutionMedians(Map<MedianSegment, Double> bySegment,
+			Map<String, Map<Integer, Double>> byGroupAndPriority,
 			Map<String, Double> byGroup) {
 	}
 
 	/** Feature values of one active incident with a deadline. */
-	public record ActiveIncident(String id, String assignedGroupName, int priorityId, Instant deadline,
+	public record ActiveIncident(String id, String assignedGroupName, Long serviceId, int priorityId, Instant deadline,
 			long deadlineExtensions, long reassignments, long reopenings, Instant lastStatusChange,
 			long assigneeOpenIncidents) {
 	}

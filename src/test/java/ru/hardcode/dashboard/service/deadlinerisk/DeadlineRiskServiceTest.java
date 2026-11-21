@@ -19,6 +19,7 @@ import ru.hardcode.dashboard.entity.ItsmIncidentState;
 import ru.hardcode.dashboard.repository.DashboardIncidentRepository.IncidentSummary;
 import ru.hardcode.dashboard.repository.DeadlineRiskRepository;
 import ru.hardcode.dashboard.repository.DeadlineRiskRepository.ActiveIncident;
+import ru.hardcode.dashboard.repository.DeadlineRiskRepository.MedianSegment;
 import ru.hardcode.dashboard.repository.DeadlineRiskRepository.ScoredRisk;
 import ru.hardcode.dashboard.repository.DeadlineRiskRepository.StoredRisk;
 import tools.jackson.databind.ObjectMapper;
@@ -47,7 +48,8 @@ class DeadlineRiskServiceTest {
 	@Test
 	void recomputeScoresEveryActiveIncidentWithDeadlineUsingTheGroupPriorityMedianFirst() {
 		given(repository.findResolutionMedians()).willReturn(new DeadlineRiskRepository.ResolutionMedians(
-				Map.of("Support", Map.of(4, 6.0)), Map.of("Support", 42.0, "КЦ ИТ Координаторы", 30.0)));
+				Map.of(new MedianSegment(1L, "Support", 4), 6.0),
+				Map.of("Support", Map.of(4, 12.0)), Map.of("Support", 42.0, "КЦ ИТ Координаторы", 30.0)));
 		given(repository.findActiveWithDeadline()).willReturn(List.of(
 				active("INC000000001", "Support", 4, 1),
 				active("INC000000002", "Support", 3, 2),
@@ -62,7 +64,7 @@ class DeadlineRiskServiceTest {
 		assertThat(captured).extracting(ScoredRisk::incidentId)
 				.containsExactly("INC000000001", "INC000000002", "INC000000003", "INC000000004");
 
-		// Priority 4 of Support uses the group×priority median of 6 h over the group fallback.
+		// Service 1, priority 4 and Support use the exact median over both group fallbacks.
 		var scoped = captured.get(0);
 		assertThat(scoped.risk()).isEqualTo(DeadlineRiskLevel.HIGH);
 		assertThat(scoped.score()).isEqualTo(-1.0 + 6.0 + 0.05 + 1.0);
@@ -78,6 +80,19 @@ class DeadlineRiskServiceTest {
 		assertThat(unknown.risk()).isEqualTo(DeadlineRiskLevel.UNKNOWN);
 		assertThat(unknown.score()).isNull();
 		assertThat(unknown.reasons()).contains("\"code\":\"no_history\"");
+	}
+
+	@Test
+	void missingServiceHistoryFallsBackToGroupAndPriority() {
+		given(repository.findResolutionMedians()).willReturn(new DeadlineRiskRepository.ResolutionMedians(
+				Map.of(), Map.of("Support", Map.of(4, 12.0)), Map.of("Support", 42.0)));
+		given(repository.findActiveWithDeadline()).willReturn(List.of(active("INC000000001", "Support", 4, 1)));
+
+		service.recompute();
+
+		ArgumentCaptor<List<ScoredRisk>> stored = ArgumentCaptor.forClass(List.class);
+		verify(repository).replaceAll(stored.capture());
+		assertThat(stored.getValue().getFirst().score()).isEqualTo(-1.0 + 12.0 + 0.05 + 1.0);
 	}
 
 	@Test
@@ -125,7 +140,7 @@ class DeadlineRiskServiceTest {
 	}
 
 	private static ActiveIncident active(String id, String group, int priority, int remainingHours) {
-		return new ActiveIncident(id, group, priority, NOW.plus(Duration.ofHours(remainingHours)),
+		return new ActiveIncident(id, group, 1L, priority, NOW.plus(Duration.ofHours(remainingHours)),
 				0, 0, 0, NOW.minus(Duration.ofHours(1)), 0);
 	}
 
