@@ -9,6 +9,10 @@ request-logging:
   max-cached-body-size: 1MB
   log-request-body: false
 
+coordinator:
+  access:
+    user-client-ids: ${COORDINATOR_USER_CLIENT_IDS:dashboard-web}
+
 itsm:
   intake:
     max-outstanding-batches: ${ITSM_INTAKE_MAX_OUTSTANDING_BATCHES:1000}

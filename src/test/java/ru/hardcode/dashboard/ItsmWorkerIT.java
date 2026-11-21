@@ -19,7 +19,7 @@ import ru.hardcode.dashboard.worker.TestingProcessorConfiguration;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.greaterThanOrEqualTo;
 import static org.hamcrest.Matchers.nullValue;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -64,6 +64,11 @@ class ItsmWorkerIT extends ItsmWorkerTestSupport {
 	void setUp() {
 		runner.stop();
 		resetDatabaseAndProcessor();
+		jdbcTemplate.update("""
+				INSERT INTO users(identity_issuer, identity_subject, login, display_name)
+				VALUES ('https://keycloak.test/realms/dashboard', 'kan54-operator', 'operator', 'Test Operator')
+				ON CONFLICT (identity_issuer, identity_subject) DO UPDATE SET is_active = true
+				""");
 	}
 
 	@Test
@@ -104,7 +109,7 @@ class ItsmWorkerIT extends ItsmWorkerTestSupport {
 					.andExpect(jsonPath("$.nextAttemptAt").value(nullValue()))
 					.andExpect(jsonPath("$.payload").doesNotExist());
 		}
-		mockMvc.perform(get("/api/snapshot/status").with(httpBasic("operator", "kan54-test-password")))
+		mockMvc.perform(get("/api/snapshot/status").with(jwt().jwt(builder -> builder.issuer("https://keycloak.test/realms/dashboard").subject("kan54-operator").claim("azp", "dashboard-web"))))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.lastSuccessAt").isNotEmpty())
 				.andExpect(jsonPath("$.revision").value(greaterThanOrEqualTo(1)))
