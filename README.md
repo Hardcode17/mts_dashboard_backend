@@ -1,181 +1,150 @@
-# mts_dashboard_backend
+# MCC — бэкенд дашборда координатора
 
-Локальный допуск координаторов, выдача доступа и интеграция с Keycloak:
-[docs/coordinator-access.md](docs/coordinator-access.md).
+Бэкенд принимает снимки инцидентов из ITSM, сохраняет их в PostgreSQL и публикует проверенную версию для дашборда. Координатор получает очередь, карточку инцидента, состояние сроков и свежесть данных. API также поддерживает изменение назначения, статуса и решения через ITSM.
 
-## Тестовый деплой на Raspberry Pi
+## Быстрый старт
 
-Пуш в main запускает Deploy backend на runner организации Hardcode17 с метками
-self-hosted, Linux, ARM64, pi-web. Второй runner не нужен.
-
-Compose-проект mts-dashboard-backend запускает Java 21 backend и PostgreSQL 17.
-Порт приложения на Pi: 8081. PostgreSQL не публикует порт наружу, данные сохраняются
-в томе postgres-data. Имя БД и пользователь: dashboard.
-
-Workflow автоматически создаёт /home/gha-runner/.config/mts-dashboard-backend/runtime.env
-с правами 600 и случайным POSTGRES_PASSWORD. Существующий пароль и остальные
-настройки сохраняются. Пароль не печатается и не хранится в Git. Заполнять
-параметры подключения вручную не нужно.
-
-Профиль demo отключает внешние AI-сервисы. Flyway создаёт deployment_sample с
-тремя искусственными записями из db/demo. Повторные деплои сохраняют данные.
-Workflow ждёт HTTP 200 от /health и проверяет количество записей через SQL.
-Только GET /health открыт без авторизации, остальные пути требуют входа.
-
-После успешного Actions проверьте из PowerShell:
-
-```powershell
-curl.exe --noproxy "*" -i http://100.77.2.49:8081/health
-```
-
-На Pi:
-
-```bash
-docker logs --tail 100 mts-dashboard-backend-backend-1
-docker exec mts-dashboard-backend-postgres-1 psql -U dashboard -d dashboard -c 'TABLE deployment_sample;'
-```
-
-Не удаляйте том и не меняйте пароль в runtime.env без согласованной смены пароля
-в PostgreSQL. Резервируйте том и runtime.env. Для перехода на рабочую БД используйте
-отдельную базу и план миграции: demo-миграция записана в историю Flyway тестовой БД.
-
-Repository Variables: BACKEND_PORT (по умолчанию 8081), BACKEND_ENV_FILE (путь выше).
-При ручном использовании Compose задайте COMPOSE_PROJECT_NAME=mts-dashboard-backend,
-BACKEND_ENV_FILE и используйте docker compose --env-file "$BACKEND_ENV_FILE" из корня.
-
-Dockerfile выполняет bootJar без тестов. Локальные тесты: ./gradlew test или
-./gradlew.bat test; нужны Java 21, доступ к зависимостям и Docker для Testcontainers.
-При ошибке workflow выводит логи обоих сервисов. Автоматического отката нет.
-
-## Рабочая база и Flyway (KAN-19)
-
-Для рабочего режима используйте отдельную БД и отдельный том. Профиль `work`
-применяет миграции из `db/migration` и проверяет их контрольные суммы при старте.
-Демонстрационная миграция `db/demo/V1` остаётся в истории старой БД. Оба профиля
-запускаются с отключёнными внешними AI-сервисами.
-
-1. Сохраните резервную копию демонстрационного тома и `runtime.env`. Для рабочей
-   базы создайте отдельный env-файл вне репозитория с правами 600 и случайным
-   `WORK_POSTGRES_PASSWORD`.
-2. Запустите рабочий стек отдельно от демо. При необходимости задайте
-   `WORK_BACKEND_PORT` в рабочем env-файле (по умолчанию 8083).
-
-   ```sh
-   docker compose -f compose.work.yaml --env-file "$WORK_ENV_FILE" up -d --build
-   curl -fsS http://127.0.0.1:8083/health
-   docker compose -f compose.work.yaml --env-file "$WORK_ENV_FILE" exec -T work-postgres \
-     psql -U dashboard -d dashboard_work -c 'SELECT version, script, success FROM flyway_schema_history ORDER BY installed_rank;'
-   ```
-
-3. Проверьте, что в рабочей истории есть `V2__itsm_ingest_batch.sql`, и выполните
-   обычный демо-smoke. Для пробного отключения остановите рабочий стек командой
-   `docker compose -f compose.work.yaml --env-file "$WORK_ENV_FILE" stop`.
-   Повторный запуск использует тот же рабочий том.
-
-Интеграционная проверка с PostgreSQL 17 и MockMvc:
-`sh ./gradlew :test --tests '*WorkDatabaseIT'`.
-
-## Чтения дашборда (KAN-23, KAN-18)
-
-[`GET /api/dashboard/incidents` и `GET /api/dashboard/incidents/{incidentId}`](docs/dashboard-api.openapi.yaml)
-читают только опубликованные данные; получение пакета с `202` ещё не меняет выдачу.
-Для интерфейса используйте человеческий JWT Keycloak, если он настроен. Машинный
-токен импорта для этих маршрутов не подходит.
-
-Для «Детальнее» передайте в окружение бэкенда `DASHBOARD_ITSM_LINK_TEMPLATE`:
-абсолютный HTTP(S) URL с одним `{incidentId}`, доступный из браузера. По умолчанию
-используется локальный `http://127.0.0.1:8082/api/mock/incidents/{incidentId}`
-из опционального `itsm-mock`. `DASHBOARD_ITSM_LINK_DEMO` по умолчанию `true`;
-для боевого шаблона задайте `false`. Получение ссылки не меняет назначений и
-не вызывает ITSM. Наличие ссылки по умолчанию не запускает мок.
-
-## Приём снимков ITSM (KAN-27)
-
-Машинный приём полного снимка, идемпотентность, ограничение очереди и состояние
-снимка описаны в [docs/itsm-ingest.md](docs/itsm-ingest.md). Там перечислены точные
-переменные окружения, контракт заголовков KAN-53 и требования к Keycloak.
-Для интеграционных тестов нужен Docker с PostgreSQL 17; для проверки авторизации
-и формата Docker не требуется.
-
-## Тестовый источник инцидентов ITCS
-
-`itsm-mock` отправляет полный синтетический снимок раз в 30 секунд. Включается
-профилем Compose после подготовки приёмника [KAN-27](https://sokolenkonikita12ru.atlassian.net/browse/KAN-27)
-и машинного клиента Keycloak с правом импорта.
-
-Добавьте в локальное окружение `ITSM_MOCK_TOKEN_URL`, `ITSM_MOCK_CLIENT_ID` и
-`ITSM_MOCK_CLIENT_SECRET`. URL токена должен быть доступен из контейнера.
-Поднимите мок вместе с бэкендом:
+Понадобятся Docker с Compose v2 и OpenSSL. Из корня репозитория:
 
 ```sh
-docker compose --env-file "$BACKEND_ENV_FILE" --profile itsm-mock up -d --build
-curl -fsS http://127.0.0.1:8082/api/mock/status
-curl -sS -i -X POST http://127.0.0.1:8082/api/mock/emit
-```
-
-URL приёмника задаёт `ITSM_MOCK_TARGET_URL`. Настройки `ITSM_MOCK_SOURCE_ID`,
-`ITSM_MOCK_SEED` и `ITSM_MOCK_BATCH_SIZE` задают источник, генерацию и размер
-синтетического снимка (1–500). Интервал задаётся через `ITSM_MOCK_INTERVAL`,
-например `PT2S`. Для ручной проверки можно задать `ITSM_MOCK_SCHEDULED=false`.
-Для регрессии смонтируйте исходную фикстуру только на чтение и укажите путь
-в контейнере в `ITSM_MOCK_FIXTURE_FILE`.
-
-Каждый новый снимок получает новую версию и ключ. При сбое мок сохраняет пакет
-в томе и продолжает с теми же заголовками и телом. При отказе вроде 401 или 422
-периодическая отправка приостанавливается с причиной в status. После исправления
-настроек повторите отправку вручную. Для каждого источника используйте один
-экземпляр отправителя и отдельный том.
-
-[Контракт приёма снимков KAN-27 / KAN-53](docs/itsm-ingest.openapi.yaml).
-
-Ответ 202 подтверждает хранение, а не применение. Статус и диагностику можно
-получить по `Location` из ответа приёмника. Изменение файла фикстуры влияет на будущие версии. Для
-повторной регрессии с исправленной фикстурой создайте отдельный тестовый источник
-с новым идентификатором и чистым томом.
-
-Проверки мока с Java 21:
-
-```sh
-sh ./gradlew :itsm-mock:test :itsm-mock:bootJar
-```
-
-`SnapshotHttpIT` проверяет реальные HTTP-запросы на локальном приёмнике.
-`SnapshotContainerIT` повторяет проверку с контейнерным приёмником и требует
-работающего Docker.
-
-
-### Локальный вход через Keycloak
-
-`compose.auth.yaml` поднимает отдельный стенд. Укажите `AUTH_REALM_FILE` вне
-репозитория и передайте через окружение `DASHBOARD_TEST_USERNAME`,
-`DASHBOARD_TEST_EMAIL`, `DASHBOARD_TEST_PASSWORD` и `ITSM_SENDER_CLIENT_SECRET`.
-Подготовьте realm на Java 21 и запустите стенд:
-
-```sh
+runtime_dir="${XDG_CONFIG_HOME:-$HOME/.config}/mcc-dashboard"
 umask 077
+mkdir -p "$runtime_dir"
+export BACKEND_ENV_FILE="$runtime_dir/demo.env"
+if [ ! -f "$BACKEND_ENV_FILE" ]; then
+  printf 'POSTGRES_PASSWORD=%s\n' "$(openssl rand -hex 32)" > "$BACKEND_ENV_FILE"
+fi
+
+docker compose --env-file "$BACKEND_ENV_FILE" up -d --build
+curl -fsS --retry 30 --retry-delay 2 --retry-connrefused http://127.0.0.1:8081/health
+```
+
+Успешный ответ `/health` имеет код HTTP 200. Compose поднимает PostgreSQL 17, а Flyway применяет общие и демонстрационные миграции. Для чтения инцидентов нужны Keycloak, допуск координатора и опубликованный снимок. Для быстрого знакомства с интерфейсом используйте локальное демо в репозитории фронтенда.
+
+Остановить стенд с сохранением базы:
+
+```sh
+docker compose --env-file "$BACKEND_ENV_FILE" down
+```
+
+## Как проходят данные
+
+```text
+ITSM или itsm-mock → приём полного JSON-снимка → очередь в PostgreSQL
+→ проверка и публикация → REST API дашборда
+```
+
+- **Приём снимка.** Отправитель использует машинный JWT и передаёт `Idempotency-Key`, `X-Source-Id` и `X-Source-Version`. Повтор той же отправки возвращает исходный ID пакета. Конфликт версии или ключа даёт HTTP 409.
+- **Публикация.** HTTP 202 подтверждает сохранение пакета. Состояние обработки доступно отдельно по адресу из `Location`. Дашборд читает опубликованные данные и может проверить свежесть по `/api/snapshot/status`.
+- **Работа с карточкой.** Изменение исполнителя, группы, статуса или решения бэкенд передаёт в ITSM. После успешного ответа сохраняет изменение локально.
+- **Доступ координатора.** Для пользовательских маршрутов нужны JWT Keycloak и включённая запись пользователя с совпадающими `iss` и `sub`. Для приёма снимков действует отдельная машинная политика доступа.
+
+| Маршрут | Назначение |
+|---|---|
+| `GET /health` | Проверка запуска без токена |
+| `GET /api/me` | Профиль и проверка допуска координатора |
+| `GET /api/dashboard/incidents` | Очереди, фильтрация, пагинация и экспорт CSV |
+| `GET /api/dashboard/incidents/{incidentId}` | Карточка инцидента |
+| `PATCH /api/dashboard/incidents/{incidentId}` | Изменение карточки через ITSM |
+| `POST /api/integrations/itsm/batches` | Приём снимка с машинным JWT |
+
+Полное описание параметров и ответов есть в [OpenAPI дашборда](docs/dashboard-api.openapi.yaml) и [OpenAPI импорта](docs/itsm-ingest.openapi.yaml).
+
+## Локальный вход через Keycloak
+
+[Отдельный стенд авторизации](compose.auth.yaml) запускает Keycloak на порту `8084` и API на порту `8091`. Для подготовки realm нужен JDK 21. Замените примеры паролей и секрета на свои локальные значения перед запуском.
+
+```sh
+export KEYCLOAK_ADMIN_PASSWORD='<local-admin-password>'
+export AUTH_POSTGRES_PASSWORD='<local-database-password>'
+export DASHBOARD_TEST_USERNAME='coordinator'
+export DASHBOARD_TEST_EMAIL='coordinator@example.invalid'
+export DASHBOARD_TEST_PASSWORD='<local-coordinator-password>'
+export ITSM_SENDER_CLIENT_SECRET='<local-sender-secret>'
+
+export AUTH_REALM_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/mcc-dashboard/dashboard-realm.json"
+umask 077
+mkdir -p "$(dirname "$AUTH_REALM_FILE")"
 java scripts/RenderRealm.java src/keycloak/realm/dashboard-realm.json "$AUTH_REALM_FILE"
 docker compose -f compose.auth.yaml up -d --build
+curl -fsS --retry 30 --retry-delay 2 --retry-connrefused http://127.0.0.1:8091/health
 ```
 
-Для Compose также нужны `KEYCLOAK_ADMIN_PASSWORD` и `AUTH_POSTGRES_PASSWORD`.
-При нестандартном порте Keycloak передайте `KEYCLOAK_PORT` в Compose и тот же
-адрес через `KEYCLOAK_PUBLIC_URL` в скрипт получения токена.
+Для входа через интерфейс используйте realm `http://localhost:8084/realms/dashboard` и API `http://127.0.0.1:8091`. Чтобы выдать допуск, скопируйте ID тестового пользователя из Keycloak и подставьте его в `subject`. Понадобится запущенный стенд авторизации.
 
 ```sh
+docker compose -f compose.auth.yaml exec -T auth-postgres \
+  psql -U dashboard -d dashboard_auth \
+  -v issuer='http://localhost:8084/realms/dashboard' \
+  -v subject='<ID пользователя из Keycloak>' \
+  -v login="$DASHBOARD_TEST_USERNAME" -v display_name='Координатор' \
+  < scripts/grant-coordinator.sql
+
+export KEYCLOAK_PUBLIC_URL='http://localhost:8084'
+export DASHBOARD_REDIRECT_URI='http://localhost:3000/auth/callback'
 token="$(bash scripts/fetch-human-token.sh)"
-curl -fsS -H "Authorization: Bearer $token" http://localhost:8091/api/me
+curl -fsS -H "Authorization: Bearer $token" http://127.0.0.1:8091/api/me
 unset token
 ```
 
-`subject` в ответе — значение `sub` из проверенного JWT. Для импорта используется
-отдельный клиент `itsm-sender` и аудитория `itsm-ingest`. Проверка в Docker
-выполняется командой `sh ./gradlew :test --tests '*HumanApiSecurityIT'`.
+Подробности о допуске и отзыве доступа есть в [инструкции координатора](docs/coordinator-access.md).
 
-Чтобы подключить внешний Keycloak к `compose.work.yaml`, задайте в рабочем env-файле
-`APP_AUTH_HUMAN_ISSUER` (точное значение `iss`, доступное браузеру),
-`APP_AUTH_HUMAN_JWK_SET_URI` (URL ключей, доступный из контейнера) и
-`APP_AUTH_HUMAN_AUDIENCE=dashboard-api`. Вместо URL ключей для человека можно задать
-`APP_AUTH_HUMAN_ISSUER_URI` для discovery. Для приёма снимков отдельно задайте
-`ITSM_INTEGRATION_AUTH_ISSUER`, `ITSM_INTEGRATION_AUTH_JWK_SET_URI`,
-`ITSM_INTEGRATION_AUTH_AUDIENCE=itsm-ingest` и `ITSM_INTEGRATION_AUTH_CLIENT_ID=itsm-sender`.
-Секрет отправителя нужен самому отправителю, бэкенд проверяет токен по публичным ключам.
+### Загрузка тестового снимка
+
+Из корня репозитория отправьте тестовую выгрузку через локальный стенд авторизации. Понадобится Python 3 для разбора ответа Keycloak.
+
+```sh
+machine_token="$(curl -fsS -X POST \
+  http://localhost:8084/realms/dashboard/protocol/openid-connect/token \
+  --data-urlencode 'grant_type=client_credentials' \
+  --data-urlencode 'client_id=itsm-sender' \
+  --data-urlencode "client_secret=$ITSM_SENDER_CLIENT_SECRET" \
+  | python3 -c 'import json, sys; print(json.load(sys.stdin)["access_token"])')"
+
+curl -fsS -i -X POST http://127.0.0.1:8091/api/integrations/itsm/batches \
+  -H "Authorization: Bearer $machine_token" \
+  -H 'Idempotency-Key: e65d1756-3bcf-4cc7-b018-0e857dcad54e' \
+  -H 'X-Source-Id: local-readme' \
+  -H 'X-Source-Version: 1' \
+  -H 'Content-Type: application/json' \
+  --data-binary @src/test/resources/itsm/character_problems.json
+```
+
+После HTTP 202 проверьте состояние по адресу из заголовка `Location`:
+
+```sh
+curl -fsS -H "Authorization: Bearer $machine_token" \
+  http://127.0.0.1:8091/api/integrations/itsm/batches/e65d1756-3bcf-4cc7-b018-0e857dcad54e
+```
+
+После `SUCCEEDED` можно подключить фронтенд к API и выполнить `unset machine_token`. Для точного повтора отправки оставьте заголовки и файл без изменений.
+
+## Источники и окружения
+
+| Что нужно | Где настроить |
+|---|---|
+| Синтетическая отправка снимков | Профиль `itsm-mock` в [compose.yaml](compose.yaml). Для отправки задайте `ITSM_MOCK_TOKEN_URL`, `ITSM_MOCK_CLIENT_ID` и `ITSM_MOCK_CLIENT_SECRET`. Адрес Keycloak должен быть доступен из контейнера. |
+| Живая связь с ITSM | `DASHBOARD_ITSM_BASE_URL` для серверных вызовов и `DASHBOARD_ITSM_LINK_TEMPLATE` для ссылки из браузера. |
+| Простая проверка запуска | Профиль `demo` по умолчанию в [compose.yaml](compose.yaml). |
+| Отдельная рабочая база | Профиль `work` из [compose.work.yaml](compose.work.yaml) с отдельным env-файлом, `WORK_POSTGRES_PASSWORD` и томом. |
+
+Мок по умолчанию отправляет синтетический снимок раз в 30 секунд. Включить его можно флагом `--profile itsm-mock` в команде запуска Compose. Основной бэкенд должен принимать токены настроенного машинного клиента. Параметры авторизации, лимиты и повторы описаны в [документации по импорту ITSM](docs/itsm-ingest.md).
+
+## Сборка и тесты
+
+Бэкенд использует Java 21, Spring Boot, PostgreSQL, Flyway и Keycloak. Из корня репозитория:
+
+```sh
+sh ./gradlew :bootJar :itsm-mock:bootJar
+sh ./gradlew test
+```
+
+Для локальной сборки нужен JDK 21, для полного прогона тестов с Testcontainers также нужен Docker. На Windows используйте `gradlew.bat`.
+
+## Репозитории проекта
+
+| Репозиторий | Роль |
+|---|---|
+| [mts_dashboard_front](https://github.com/Hardcode17/mts_dashboard_front) | Интерфейс координатора и локальный демостенд |
+| [mts_dashboard_backend](https://github.com/Hardcode17/mts_dashboard_backend) | API, доступ и приём снимков ITSM |
+| [mts_dashboard_data](https://github.com/Hardcode17/mts_dashboard_data) | Материалы кейса, требования и контракты |
