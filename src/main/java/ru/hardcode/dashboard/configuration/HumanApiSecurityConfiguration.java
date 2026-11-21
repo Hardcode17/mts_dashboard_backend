@@ -31,7 +31,8 @@ public class HumanApiSecurityConfiguration {
 	static final String HUMAN_REALM = "dashboard-human";
 	static final RequestMatcher DASHBOARD_INCIDENTS = new OrRequestMatcher(
 			PathPatternRequestMatcher.withDefaults().matcher("/api/dashboard/incidents"),
-			PathPatternRequestMatcher.withDefaults().matcher("/api/dashboard/incidents/{incidentId}"));
+			PathPatternRequestMatcher.withDefaults().matcher("/api/dashboard/incidents/{incidentId}"),
+			PathPatternRequestMatcher.withDefaults().matcher("/api/dashboard/incidents/{incidentId}/similar"));
 
 	@Bean
 	@Order(2)

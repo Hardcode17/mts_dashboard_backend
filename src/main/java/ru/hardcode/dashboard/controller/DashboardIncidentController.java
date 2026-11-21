@@ -21,9 +21,11 @@ import org.springframework.web.bind.annotation.RestController;
 import ru.hardcode.dashboard.dto.DashboardIncidentCardResponse;
 import ru.hardcode.dashboard.dto.DashboardIncidentListResponse;
 import ru.hardcode.dashboard.dto.DashboardIncidentListResponse.Membership;
+import ru.hardcode.dashboard.dto.DashboardSimilarIncidentsResponse;
 import ru.hardcode.dashboard.service.CoordinatorAccessService;
 import ru.hardcode.dashboard.service.DashboardIncidentService;
 import ru.hardcode.dashboard.service.ItsmApiClient;
+import ru.hardcode.dashboard.service.SimilarIncidentService;
 
 @RestController
 @RequestMapping("/api/dashboard")
@@ -34,18 +36,27 @@ public class DashboardIncidentController {
 	private final DashboardIncidentService service;
 	private final ItsmApiClient itsm;
 	private final CoordinatorAccessService access;
+	private final SimilarIncidentService similar;
 
 	public DashboardIncidentController(DashboardIncidentService service, ItsmApiClient itsm,
-			CoordinatorAccessService access) {
+			CoordinatorAccessService access, SimilarIncidentService similar) {
 		this.service = service;
 		this.itsm = itsm;
 		this.access = access;
+		this.similar = similar;
 	}
 
 	@GetMapping(path = "/incidents/{incidentId}", produces = MediaType.APPLICATION_JSON_VALUE)
 	public ResponseEntity<DashboardIncidentCardResponse> card(@PathVariable String incidentId) {
 		// remainingSeconds is calculated at read time, even when the publication is unchanged.
 		return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(service.card(incidentId));
+	}
+
+	@GetMapping(path = "/incidents/{incidentId}/similar", produces = MediaType.APPLICATION_JSON_VALUE)
+	public ResponseEntity<DashboardSimilarIncidentsResponse> similar(@PathVariable String incidentId,
+			@RequestParam(required = false) String limit) {
+		// Suggestions are derived from the published snapshot only: reading never creates a relation.
+		return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(similar.similar(incidentId, limit));
 	}
 
 	@PatchMapping("/incidents/{incidentId}")
