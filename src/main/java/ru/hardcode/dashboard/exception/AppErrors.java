@@ -36,6 +36,8 @@ public enum AppErrors implements AppError {
 	INVALID_GROUP("INVALID_GROUP", HttpStatus.BAD_REQUEST, "Unknown dashboard group ${group}"),
 	INVALID_CURSOR("INVALID_CURSOR", HttpStatus.BAD_REQUEST, "cursor is not a valid list cursor"),
 	INVALID_LIMIT("INVALID_LIMIT", HttpStatus.BAD_REQUEST, "limit must be between 1 and 100"),
+	INVALID_EVENT_SEQ("INVALID_EVENT_SEQ", HttpStatus.BAD_REQUEST, "sinceEventSeq must be a non-negative 64-bit integer"),
+	INVALID_EVENT_LIMIT("INVALID_EVENT_LIMIT", HttpStatus.BAD_REQUEST, "limit must be between 1 and 500"),
 	INVALID_INCIDENT_ID("INVALID_INCIDENT_ID", HttpStatus.BAD_REQUEST,
 			"incidentId must be an INC identifier such as INC000021095531"),
 	INCIDENT_NOT_FOUND("INCIDENT_NOT_FOUND", HttpStatus.NOT_FOUND, "Incident${incident} not found"),
