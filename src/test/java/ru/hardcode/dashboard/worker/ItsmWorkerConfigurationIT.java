@@ -29,6 +29,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ItsmWorkerConfigurationIT {
 
 	@SpringBootTest(properties = {
+			"itsm.publication.enabled=false",
 			"itsm.worker.poll-interval=PT1H",
 			"spring.flyway.locations=classpath:db/migration,classpath:db/demo,classpath:db/test"
 	})
@@ -92,6 +93,7 @@ class ItsmWorkerConfigurationIT {
 	}
 
 	@SpringBootTest(properties = {
+			"itsm.publication.enabled=false",
 			"itsm.worker.poll-interval=PT1H",
 			"spring.flyway.locations=classpath:db/migration,classpath:db/demo,classpath:db/test"
 	})

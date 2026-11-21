@@ -34,6 +34,7 @@ final class IncidentGenerator {
     }
 
     List<Map<String, Object>> next(List<Map<String, Object>> previous, long version, Instant now) {
+        now = now.truncatedTo(ChronoUnit.MICROS);
         if (previous.isEmpty()) {
             var initial = new ArrayList<Map<String, Object>>(size);
             for (int index = 0; index < size; index++) {

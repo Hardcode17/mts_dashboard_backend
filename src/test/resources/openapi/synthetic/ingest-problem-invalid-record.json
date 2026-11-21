@@ -1,8 +1,0 @@
-{
-  "type": "about:blank",
-  "title": "ITSM snapshot was rejected",
-  "status": 422,
-  "code": "ITSM_INVALID_RECORD",
-  "detail": "ITSM record in snapshot at index 0 has invalid field id: must be a string",
-  "instance": "2026-11-21T09:05:00.123456Z"
-}

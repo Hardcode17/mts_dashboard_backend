@@ -23,8 +23,10 @@ itsm:
   intake:
     max-outstanding-batches: ${ITSM_INTAKE_MAX_OUTSTANDING_BATCHES:1000}
     stale-after: ${ITSM_INTAKE_STALE_AFTER:PT90S}
+  publication:
+    enabled: ${ITSM_PUBLICATION_ENABLED:true}
   worker:
-    # Runs only when a real ItsmBatchProcessor bean exists (KAN-55); otherwise batches stay RECEIVED.
+    # Disable on instances that should accept requests without processing them.
     enabled: ${ITSM_WORKER_ENABLED:true}
     workers: ${ITSM_WORKER_WORKERS:2}
     max-attempts: ${ITSM_WORKER_MAX_ATTEMPTS:5}

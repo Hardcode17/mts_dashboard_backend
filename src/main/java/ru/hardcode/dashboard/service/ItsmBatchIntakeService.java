@@ -84,7 +84,11 @@ public class ItsmBatchIntakeService {
 			throw new AppException(AppErrors.ITSM_SOURCE_VERSION_CONFLICT);
 		}
 
-		if (sqlRepository.countOutstanding() >= maxOutstandingBatches) {
+		long outstanding = sqlRepository.countOutstanding();
+		// One bounded extra slot lets a missing predecessor unblock a saturated queue.
+		boolean gapRepair = maxOutstandingBatches > 0 && outstanding == maxOutstandingBatches
+				&& sqlRepository.isAwaitedVersion(validatedSourceId, validatedSourceVersion);
+		if (outstanding >= maxOutstandingBatches && !gapRepair) {
 			throw new AppException(AppErrors.ITSM_INTAKE_QUEUE_FULL, Map.of("max", maxOutstandingBatches));
 		}
 
@@ -176,7 +180,7 @@ public class ItsmBatchIntakeService {
 		}
 	}
 
-	private static String validateSourceId(String value) {
+	static String validateSourceId(String value) {
 		if (value == null || !SOURCE_ID_PATTERN.matcher(value).matches()) {
 			throw new AppException(AppErrors.ITSM_INVALID_SOURCE_ID);
 		}

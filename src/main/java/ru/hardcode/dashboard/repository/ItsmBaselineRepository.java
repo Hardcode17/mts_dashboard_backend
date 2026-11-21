@@ -9,6 +9,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
 
 import org.springframework.jdbc.core.RowCallbackHandler;
@@ -37,10 +38,8 @@ import ru.hardcode.dashboard.service.ItsmDomainMapping.Incident;
 import ru.hardcode.dashboard.service.ItsmDomainMapping.IncidentAttribute;
 
 /**
- * PostgreSQL storage of the KAN-17 domain baseline. Writes run in the caller's transaction
- * (the KAN-55 worker claim transaction): the baseline is replaced as one unit, so any failure
- * leaves the previous baseline intact and no partially imported snapshot is ever visible.
- * The installer holds a transaction-scoped advisory lock, so two installs never interleave.
+ * PostgreSQL storage of the KAN-17 domain baseline and current projection. Imports run
+ * under the shared publication lock in the caller's transaction.
  */
 @Repository
 public class ItsmBaselineRepository {
@@ -68,7 +67,7 @@ public class ItsmBaselineRepository {
 			    SELECT id, sys_id, state, priority_id, submit_date, last_assignment_to_team_at, deadline,
 			           completion_date, waiting_exit_date, solution, product_id, service_id, scenario_id,
 			           assigned_group_id, assigned_person_id, initiator_person_id
-			    FROM itsm_incident
+			    FROM itsm_incident WHERE present_in_source
 			), prod AS (
 			    SELECT id, product_key, external_product_id, product_master_id, product_url
 			    FROM itsm_catalog_product
@@ -86,10 +85,10 @@ public class ItsmBaselineRepository {
 			    FROM itsm_external_group
 			), asg AS (
 			    SELECT incident_id, person_id, group_id, assigned_at
-			    FROM itsm_external_assignment
+			    FROM itsm_external_assignment WHERE incident_id IN (SELECT id FROM inc)
 			), attr AS (
 			    SELECT incident_id, attribute_name, value_type, string_value, number_value, boolean_value
-			    FROM itsm_incident_attribute
+			    FROM itsm_incident_attribute WHERE incident_id IN (SELECT id FROM inc)
 			)
 			SELECT 'SNAPSHOT' AS section,
 			       NULL::TEXT AS incident_id, NULL::TEXT AS sys_id, NULL::BIGINT AS product_id,
@@ -174,29 +173,58 @@ public class ItsmBaselineRepository {
 			Instant appliedAt
 	) {
 
+		Set<String> incidentIds = mapping.records().stream().map(Incident::id)
+				.collect(java.util.stream.Collectors.toSet());
+		int incidents = upsertDomain(mapping, sourceId, incidentIds, Set.of());
+		updateSnapshot(batchId, sourceId, sourceVersion, payloadSha256, appliedAt);
+		return incidents;
+	}
+
+	/** Updates source-owned columns and current external assignments only, never local incident fields. */
+	public int upsertDomain(ItsmDomainMapping mapping, String sourceId,
+			Set<String> changedPresent, Set<String> missing) {
+		deleteExternalAssignments(missing);
+		if (changedPresent.isEmpty()) {
+			return 0;
+		}
 		Map<String, Long> productIds = insertProducts(mapping.products());
 		Map<ServiceRef, Long> serviceIds = insertServices(mapping.services(), productIds);
 		Map<ScenarioRef, Long> scenarioIds = insertScenarios(mapping.scenarios(), serviceIds);
 		Map<String, Long> personIds = insertPeople(mapping.people());
 		Map<String, Long> groupIds = insertGroups(mapping.groups());
 		insertHints(mapping.catalogHints());
-		int incidents = insertIncidents(mapping.records(), productIds, serviceIds, scenarioIds, personIds, groupIds);
-		insertAssignments(mapping.assignments(), personIds, groupIds);
-		insertAttributes(mapping.attributes());
+		List<Incident> changed = mapping.records().stream().filter(incident -> changedPresent.contains(incident.id())).toList();
+		int incidents = insertIncidents(changed, sourceId, productIds, serviceIds, scenarioIds, personIds, groupIds);
+		deleteExternalAssignments(changedPresent);
+		insertAssignments(mapping.assignments().stream().filter(a -> changedPresent.contains(a.incidentId())).toList(),
+				personIds, groupIds);
+		jdbcClient.sql("DELETE FROM itsm_incident_attribute WHERE incident_id IN (:ids)")
+				.param("ids", changedPresent).update();
+		insertAttributes(mapping.attributes(), changedPresent);
+		return incidents;
+	}
 
+	private void deleteExternalAssignments(Set<String> ids) {
+		if (!ids.isEmpty()) {
+			jdbcClient.sql("DELETE FROM itsm_external_assignment WHERE incident_id IN (:ids)").param("ids", ids).update();
+		}
+	}
+
+	public void updateSnapshot(UUID batchId, String sourceId, long sourceVersion, String payloadSha256, Instant appliedAt) {
 		jdbcClient.sql("""
 				INSERT INTO itsm_snapshot (id, batch_id, source_id, source_version, payload_sha256,
 				                           incident_count, applied_at)
-				VALUES (1, ?, ?, ?, ?, ?, ?)
+				VALUES (1, ?, ?, ?, ?, (SELECT count(*) FROM itsm_incident WHERE present_in_source), ?)
+				ON CONFLICT (id) DO UPDATE SET batch_id = EXCLUDED.batch_id, source_id = EXCLUDED.source_id,
+				    source_version = EXCLUDED.source_version, payload_sha256 = EXCLUDED.payload_sha256,
+				    incident_count = EXCLUDED.incident_count, applied_at = EXCLUDED.applied_at
 				""")
 				.param(batchId)
 				.param(sourceId)
 				.param(sourceVersion)
 				.param(payloadSha256)
-				.param(incidents)
 				.param(Timestamp.from(appliedAt))
 				.update();
-		return incidents;
 	}
 
 	/**
@@ -215,6 +243,8 @@ public class ItsmBaselineRepository {
 			Long id = jdbcClient.sql("""
 					INSERT INTO itsm_catalog_product (product_key, external_product_id, product_master_id, product_url)
 					VALUES (?, ?, ?, ?)
+					ON CONFLICT (product_key) DO UPDATE SET external_product_id = EXCLUDED.external_product_id,
+					    product_master_id = EXCLUDED.product_master_id, product_url = EXCLUDED.product_url
 					RETURNING id
 					""")
 					.param(product.productKey())
@@ -235,6 +265,7 @@ public class ItsmBaselineRepository {
 			Long id = jdbcClient.sql("""
 					INSERT INTO itsm_catalog_service (product_id, service_key, external_service_id)
 					VALUES (?, ?, ?)
+					ON CONFLICT (product_id, service_key) DO UPDATE SET external_service_id = EXCLUDED.external_service_id
 					RETURNING id
 					""")
 					.param(productId)
@@ -255,6 +286,7 @@ public class ItsmBaselineRepository {
 			Long id = jdbcClient.sql("""
 					INSERT INTO itsm_catalog_scenario (service_id, scenario_key)
 					VALUES (?, ?)
+					ON CONFLICT (service_id, scenario_key) DO UPDATE SET scenario_key = EXCLUDED.scenario_key
 					RETURNING id
 					""")
 					.param(serviceId)
@@ -282,6 +314,7 @@ public class ItsmBaselineRepository {
 			Long id = jdbcClient.sql("""
 					INSERT INTO itsm_external_person (external_login, display_name)
 					VALUES (?, ?)
+					ON CONFLICT (external_login) DO UPDATE SET display_name = EXCLUDED.display_name
 					RETURNING id
 					""")
 					.param(person.externalLogin())
@@ -299,6 +332,7 @@ public class ItsmBaselineRepository {
 			Long id = jdbcClient.sql("""
 					INSERT INTO itsm_external_group (group_name)
 					VALUES (?)
+					ON CONFLICT (group_name) DO UPDATE SET group_name = EXCLUDED.group_name
 					RETURNING id
 					""")
 					.param(group.groupName())
@@ -314,6 +348,7 @@ public class ItsmBaselineRepository {
 			jdbcClient.sql("""
 					INSERT INTO itsm_ingest_catalog_hint (identity_scope, parent_key, external_identity)
 					VALUES (?, ?, ?)
+					ON CONFLICT (identity_scope, parent_key, external_identity) DO NOTHING
 					""")
 					.param(hint.scope().name())
 					.param(hint.parentKey())
@@ -324,6 +359,7 @@ public class ItsmBaselineRepository {
 
 	private int insertIncidents(
 			List<Incident> incidents,
+			String sourceId,
 			Map<String, Long> productIds,
 			Map<ServiceRef, Long> serviceIds,
 			Map<ScenarioRef, Long> scenarioIds,
@@ -336,8 +372,16 @@ public class ItsmBaselineRepository {
 					INSERT INTO itsm_incident (
 					    id, sys_id, state, priority_id, submit_date, last_assignment_to_team_at, deadline,
 					    completion_date, waiting_exit_date, solution, product_id, service_id, scenario_id,
-					    assigned_group_id, assigned_person_id, initiator_person_id
-					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					    assigned_group_id, assigned_person_id, initiator_person_id, source_id
+					) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+					ON CONFLICT (id) DO UPDATE SET sys_id = EXCLUDED.sys_id, state = EXCLUDED.state,
+					    priority_id = EXCLUDED.priority_id, submit_date = EXCLUDED.submit_date,
+					    last_assignment_to_team_at = EXCLUDED.last_assignment_to_team_at, deadline = EXCLUDED.deadline,
+					    completion_date = EXCLUDED.completion_date, waiting_exit_date = EXCLUDED.waiting_exit_date,
+					    solution = EXCLUDED.solution, product_id = EXCLUDED.product_id, service_id = EXCLUDED.service_id,
+					    scenario_id = EXCLUDED.scenario_id, assigned_group_id = EXCLUDED.assigned_group_id,
+					    assigned_person_id = EXCLUDED.assigned_person_id, initiator_person_id = EXCLUDED.initiator_person_id,
+					    source_id = EXCLUDED.source_id
 					""")
 					.param(incident.id())
 					.param(incident.sysId())
@@ -355,6 +399,7 @@ public class ItsmBaselineRepository {
 					.param(optionalId(groupIds, incident.assignedGroupName()))
 					.param(optionalId(personIds, incident.assignedPersonLogin()))
 					.param(optionalId(personIds, incident.initiatorLogin()))
+					.param(sourceId)
 					.update();
 		}
 		return incidents.size();
@@ -380,8 +425,11 @@ public class ItsmBaselineRepository {
 		}
 	}
 
-	private void insertAttributes(Map<String, List<IncidentAttribute>> attributes) {
+	private void insertAttributes(Map<String, List<IncidentAttribute>> attributes, Set<String> ids) {
 		attributes.forEach((incidentId, values) -> {
+			if (!ids.contains(incidentId)) {
+				return;
+			}
 			for (IncidentAttribute attribute : values) {
 				jdbcClient.sql("""
 						INSERT INTO itsm_incident_attribute (

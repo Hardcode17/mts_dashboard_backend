@@ -46,7 +46,7 @@ final class OpenApiContractValidator {
 	static final Set<String> REQUIRED_FIXTURES = Set.of("snapshot-minimal", "snapshot-next-tick",
 			"source-batch-request", "ingest-accepted-202", "ingest-accepted-replay-202",
 			"ingest-batch-received-200", "ingest-batch-next-attempt-200", "ingest-batch-succeeded-200",
-			"snapshot-status-stale", "snapshot-status-published", "ingest-problem-invalid-record",
+			"snapshot-status-stale", "snapshot-status-published", "ingest-batch-invalid-200",
 			"list-default", "list-critical", "list-empty-group", "list-before-first-success",
 			"card-without-deadline", "card-research", "card-completed", "card-before-first-success",
 			"card-not-found", "sources-published", "sources-stale", "events-poll-two-events",

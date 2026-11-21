@@ -68,25 +68,23 @@ public class ItsmWorkerTransactionService {
 				),
 				publication
 		);
-		if (!publication.prepared) {
-			throw new IllegalStateException("ITSM processor finished without markSucceeded");
+		if (publication.outcome == null) {
+			throw new IllegalStateException("ITSM processor finished without a publication outcome");
 		}
 
 		Instant now = Instant.now();
-		boolean applied = sqlRepository.markSucceeded(
-				batch.batchId(),
-				owner,
-				batch.attempt(),
-				batch.rowVersion(),
-				publication.revision,
-				ItsmWorkerService.diagnostic(publication.diagnostic),
-				now
-		);
-		if (!applied) {
+		String diagnostic = ItsmWorkerService.diagnostic(publication.diagnostic);
+		boolean settled = switch (publication.outcome) {
+			case APPLIED, SKIPPED -> sqlRepository.markSucceeded(batch.batchId(), owner, batch.attempt(),
+					batch.rowVersion(), publication.revision, diagnostic, now, publication.outcome == Outcome.APPLIED);
+			case INVALID, DEFERRED -> sqlRepository.settleWithoutPublication(
+					batch, owner, now, diagnostic, publication.waitingForVersion);
+		};
+		if (!settled) {
 			// The transaction holds the current claim lock, so this is an invariant violation.
 			throw new IllegalStateException("ITSM batch claim is no longer current inside its transaction");
 		}
-		log.info("ITSM batch {} SUCCEEDED with revision {}", batch.batchId(), publication.revision);
+		log.info("ITSM batch {} processing outcome: {}", batch.batchId(), publication.outcome);
 		return batch;
 	}
 
@@ -152,23 +150,53 @@ public class ItsmWorkerTransactionService {
 	 */
 	private static final class PreparedPublication implements ItsmBatchProcessor.PublicationContext {
 
-		private boolean prepared;
+		private Outcome outcome;
 		private long revision;
 		private String diagnostic;
+		private Long waitingForVersion;
 
 		@Override
 		public void markSucceeded(long revision, String diagnostic) {
-			if (prepared) {
-				throw new IllegalStateException("ITSM publication already prepared for this batch");
-			}
+			complete(Outcome.APPLIED, revision, diagnostic);
+		}
+
+		@Override
+		public void markSkipped(long revision, String diagnostic) {
+			complete(Outcome.SKIPPED, revision, diagnostic);
+		}
+
+		private void complete(Outcome outcome, long revision, String diagnostic) {
 			if (revision <= 0) {
 				throw new IllegalArgumentException("ITSM applied revision must be positive");
 			}
-			prepared = true;
+			prepare(outcome, diagnostic);
 			this.revision = revision;
+		}
+
+		@Override
+		public void rejectInvalid(String diagnostic) {
+			prepare(Outcome.INVALID, diagnostic);
+		}
+
+		@Override
+		public void deferUntil(long sourceVersion) {
+			if (sourceVersion <= 0) {
+				throw new IllegalArgumentException("Expected source version must be positive");
+			}
+			prepare(Outcome.DEFERRED, "Waiting for source version " + sourceVersion);
+			this.waitingForVersion = sourceVersion;
+		}
+
+		private void prepare(Outcome outcome, String diagnostic) {
+			if (this.outcome != null) {
+				throw new IllegalStateException("ITSM publication already prepared for this batch");
+			}
+			this.outcome = outcome;
 			this.diagnostic = diagnostic;
 		}
 	}
+
+	private enum Outcome { APPLIED, SKIPPED, INVALID, DEFERRED }
 
 	/**
 	 * A claimed batch whose publication failed. The publication transaction has rolled back when this

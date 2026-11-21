@@ -26,10 +26,16 @@ public class ItsmWorkerSqlRepository {
 		List<ClaimedBatch> rows = jdbcTemplate.query(
 				"""
 				WITH candidate AS (
-				    SELECT id
-				    FROM itsm_ingest_batch
-				    WHERE status = ? OR (status = ? AND next_attempt_at <= ?)
-				    ORDER BY COALESCE(next_attempt_at, received_at), id
+				    SELECT queued.id
+				    FROM itsm_ingest_batch AS queued
+				    WHERE (queued.status = ? OR (queued.status = ? AND queued.next_attempt_at <= ?))
+				      AND (queued.waiting_for_version IS NULL OR EXISTS (
+				          SELECT 1 FROM itsm_ingest_batch AS predecessor
+				          WHERE predecessor.source_id = queued.source_id
+				            AND predecessor.source_version = queued.waiting_for_version
+				            AND (predecessor.status = 'SUCCEEDED' OR predecessor.validation_rejected)
+				      ))
+				    ORDER BY COALESCE(queued.next_attempt_at, queued.received_at), queued.id
 				    LIMIT 1
 				    FOR UPDATE SKIP LOCKED
 				)
@@ -40,6 +46,7 @@ public class ItsmWorkerSqlRepository {
 				    claimed_by = ?,
 				    heartbeat_at = ?,
 				    next_attempt_at = NULL,
+				    waiting_for_version = NULL,
 				    diagnostic = NULL
 				FROM candidate
 				WHERE batch.id = candidate.id
@@ -91,7 +98,8 @@ public class ItsmWorkerSqlRepository {
 			long rowVersion,
 			long processingRevision,
 			String diagnostic,
-			Instant processedAt
+			Instant now,
+			boolean applied
 	) {
 		int updated = jdbcTemplate.update(
 				"""
@@ -108,8 +116,8 @@ public class ItsmWorkerSqlRepository {
 				  AND row_version = ?
 				""",
 				ItsmBatchStatus.SUCCEEDED.name(),
-				Timestamp.from(processedAt),
-				Timestamp.from(processedAt),
+				Timestamp.from(now),
+				applied ? Timestamp.from(now) : null,
 				processingRevision,
 				diagnostic,
 				batchId,
@@ -119,6 +127,20 @@ public class ItsmWorkerSqlRepository {
 				rowVersion
 		);
 		return updated == 1;
+	}
+
+	public boolean settleWithoutPublication(
+			ClaimedBatch batch, String owner, Instant now, String diagnostic, Long waitingForVersion
+	) {
+		boolean deferred = waitingForVersion != null;
+		return jdbcTemplate.update("""
+				UPDATE itsm_ingest_batch
+				SET status = ?, status_updated_at = ?, diagnostic = ?, claimed_by = NULL, heartbeat_at = NULL,
+				    waiting_for_version = ?, validation_rejected = ?, batch_attempts = batch_attempts - ?
+				WHERE id = ? AND status = 'PROCESSING' AND claimed_by = ? AND batch_attempts = ? AND row_version = ?
+				""", deferred ? ItsmBatchStatus.RECEIVED.name() : ItsmBatchStatus.FAILED.name(), Timestamp.from(now),
+				diagnostic, waitingForVersion, !deferred, deferred ? 1 : 0,
+				batch.batchId(), owner, batch.attempt(), batch.rowVersion()) == 1;
 	}
 
 	/**
