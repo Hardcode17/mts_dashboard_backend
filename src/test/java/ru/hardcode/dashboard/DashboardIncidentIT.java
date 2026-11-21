@@ -102,9 +102,10 @@ class DashboardIncidentIT extends ItsmWorkerTestSupport {
         mockMvc.perform(get("/api/dashboard/incidents").param("group","research").with(human)).andExpect(status().isOk())
                 .andExpect(jsonPath("$.items[?(@.id == '"+id+"')].assignedGroupName",org.hamcrest.Matchers.hasItem("Support")));
         assertThat(http.send(page,HttpResponse.BodyHandlers.ofString()).body()).contains("Support","Fixed");
-        assertThat(jdbcTemplate.queryForObject("SELECT status FROM coordination_tasks WHERE incident_id=?",String.class,id)).isEqualTo("completed");
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM coordination_tasks WHERE incident_id=?",String.class,id)).isEqualTo("open");
         assertThat(jdbcTemplate.queryForObject("SELECT count(*) FROM itsm_incident_change WHERE coordinator_id IS NOT NULL",Long.class)).isEqualTo(1);
         publish(2);
+        assertThat(jdbcTemplate.queryForObject("SELECT status FROM coordination_tasks WHERE incident_id=?",String.class,id)).isEqualTo("completed");
         assertThat(journalCount()).isEqualTo(changes+1);
         var noDeadline=jdbcTemplate.queryForList("SELECT id FROM itsm_incident WHERE deadline IS NULL",String.class);
         assertThat(noDeadline).hasSize(3);

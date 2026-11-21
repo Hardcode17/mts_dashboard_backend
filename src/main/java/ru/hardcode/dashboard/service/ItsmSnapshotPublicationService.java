@@ -155,9 +155,8 @@ public class ItsmSnapshotPublicationService implements ItsmBatchProcessor {
 				.sorted(Comparator.comparing(ItsmIncidentRecord::id)).toList();
 		var mapping = mapper.map(new ItsmIncidentSnapshot(changedRecords));
 		domain.upsertDomain(mapping, work.sourceId(), present, missing);
-		if (head.observedVersion() != null && !changes.isEmpty()) {
-			coordinationTasks.observeEntries(work.sourceId(), revision);
-		}
+		coordinationTasks.observeHandoffs(work.sourceId(), work.sourceVersion(), snapshot, clock.instant(),
+				head.observedVersion() == null ? null : changes.isEmpty() ? -1L : revision);
 		domain.replaceImportedHierarchy(work.sourceId(), hierarchy.linksByChildId());
 		repository.updateObservation(work.sourceId(), work.sourceVersion(), revision, snapshot);
 		Instant appliedAt = clock.instant();

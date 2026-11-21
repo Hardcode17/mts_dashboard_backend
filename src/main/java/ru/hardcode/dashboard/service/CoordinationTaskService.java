@@ -1,6 +1,7 @@
 package ru.hardcode.dashboard.service;
 
 import java.util.List;
+import java.time.Instant;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -20,14 +21,9 @@ public class CoordinationTaskService {
 		this.externalGroup = externalGroup;
 	}
 
-	/** Joins publication transaction after the incident projection has been written. */
-	public void observeEntries(String sourceId, long revision) {
-		if (externalGroup.isBlank()) {
-			return;
-		}
-		for (String incidentId : repository.enteredIncidents(sourceId, revision, externalGroup)) {
-			repository.insertOpen(incidentId);
-		}
+	/** Joins publication transaction; PATCH updates never modify the official baseline. */
+	public void observeHandoffs(String sourceId, long version, String snapshot, Instant observedAt, Long entryRevision) {
+		repository.observeHandoffs(sourceId, version, snapshot, externalGroup, observedAt, entryRevision);
 	}
 
 	@Transactional(readOnly = true)
