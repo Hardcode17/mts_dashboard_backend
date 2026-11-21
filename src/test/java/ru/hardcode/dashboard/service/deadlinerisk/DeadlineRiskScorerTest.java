@@ -23,7 +23,7 @@ class DeadlineRiskScorerTest {
 			DeadlineRiskProperties.Mode.REGRESSION, null, null,
 			new DeadlineRiskProperties.Regression(
 					new DeadlineRiskProperties.Weights(-1.0, 1.0, 1.0, 0.5, 1.0, 0.05, 0.1, 0.25),
-					new DeadlineRiskProperties.Thresholds(0.0, 1.0), null, 0.05),
+					new DeadlineRiskProperties.Thresholds(0.0, 1.0), null, 0.05, null),
 			null);
 
 	@Test
@@ -131,7 +131,7 @@ class DeadlineRiskScorerTest {
 		// score = -1 + 3 + 1 + 2*0.5 + 1 + 30*0.05 + 7*0.1 + 4*0.25 = 8.2 >= high(1.0).
 		var result = scorer.evaluate(new DeadlineRiskInput("Support",
 				Instant.parse("2026-11-21T12:00:00Z"), NOW, 6.0, 1, 2, 1,
-				Duration.ofHours(30), 7, 4));
+				Duration.ofHours(30), 7, 1));
 
 		assertThat(result.risk()).isEqualTo(DeadlineRiskLevel.HIGH);
 		assertThat(result.score()).isCloseTo(8.2, offset(1e-9));
@@ -145,7 +145,7 @@ class DeadlineRiskScorerTest {
 		// x1 without the clamp would be 60000/0.05 = 1_200_000, x5 would be 10000.
 		var clamped = new DeadlineRiskScorer(REGRESSION).evaluate(new DeadlineRiskInput("Support",
 				Instant.parse("2026-11-21T12:00:00Z"), NOW, 60000.0, 500, 100, 50,
-				Duration.ofHours(10000), 1000, 9));
+				Duration.ofHours(10000), 1000, 1));
 
 		assertThat(clamped.score()).isCloseTo(-1.0 + 100 + 200 + 0.5 * 50 + 20 + 2160 * 0.05 + 100 * 0.1
 				+ 4 * 0.25, offset(1e-9));
@@ -194,23 +194,11 @@ class DeadlineRiskScorerTest {
 	}
 
 	@Test
-	void regressionModeWithoutUsableMedianHistoryIsUnknown() {
-		var noMedian = new DeadlineRiskScorer(REGRESSION).evaluate(new DeadlineRiskInput("Support",
-				Instant.parse("2026-11-21T12:00:00Z"), NOW, null, 0, 0, 0, Duration.ZERO, 0, 4));
-		assertThat(noMedian.risk()).isEqualTo(DeadlineRiskLevel.UNKNOWN);
-		assertThat(noMedian.score()).isNull();
-		assertThat(noMedian.reasons()).extracting(DeadlineRiskResult.Reason::code).containsExactly("no_history");
-
-		var zeroMedian = new DeadlineRiskScorer(REGRESSION).evaluate(new DeadlineRiskInput("Support",
-				Instant.parse("2026-11-21T12:00:00Z"), NOW, 0.0, 0, 0, 0, Duration.ZERO, 0, 4));
-		assertThat(zeroMedian.reasons()).extracting(DeadlineRiskResult.Reason::text)
-				.containsExactly("Нет завершённых карточек группы «Support» — медиана решения недоступна");
-
-		var noGroup = new DeadlineRiskScorer(REGRESSION).evaluate(new DeadlineRiskInput(null,
-				Instant.parse("2026-11-21T12:00:00Z"), NOW, 6.0, 0, 0, 0, Duration.ZERO, 0, 4));
-		assertThat(noGroup.risk()).isEqualTo(DeadlineRiskLevel.UNKNOWN);
-		assertThat(noGroup.reasons()).extracting(DeadlineRiskResult.Reason::text)
-				.containsExactly("Карточка без назначенной группы — медиана решения недоступна");
+	void unfamiliarPriorityLeavesTheCardReadable() {
+		var result = new DeadlineRiskScorer(SHIPPED).evaluate(new DeadlineRiskInput("Support",
+				NOW.plus(Duration.ofHours(2)), NOW, null, 0, 0, 0, Duration.ZERO, 0, 9));
+		assertThat(result.risk()).isEqualTo(DeadlineRiskLevel.UNKNOWN);
+		assertThat(result.reasons()).extracting(DeadlineRiskResult.Reason::code).containsExactly("unsupported_priority");
 	}
 
 	@Test
@@ -224,7 +212,7 @@ class DeadlineRiskScorerTest {
 		assertThatThrownBy(() -> new DeadlineRiskProperties.Reasons(0, 5))
 				.isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(() -> new DeadlineRiskProperties.Regression(null, null,
-				new DeadlineRiskProperties.Clamps(null, null, null, null, null, null, null), 0.25))
+				new DeadlineRiskProperties.Clamps(null, null, null, null, null, null, null), 0.25, null))
 				.isInstanceOf(IllegalArgumentException.class);
 		assertThatThrownBy(() -> new DeadlineRiskProperties(null, -1.0, null, null, null))
 				.isInstanceOf(IllegalArgumentException.class);
@@ -235,6 +223,6 @@ class DeadlineRiskScorerTest {
 
 	private static DeadlineRiskInput input(double remainingHours, Double medianHours) {
 		return new DeadlineRiskInput("Support", NOW.plusSeconds((long) (remainingHours * 3600)), NOW,
-				medianHours, 0, 0, 0, Duration.ZERO, 0, 1);
+				medianHours, 0, 0, 0, Duration.ZERO, 0, 4);
 	}
 }

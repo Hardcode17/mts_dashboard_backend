@@ -1,5 +1,7 @@
 package ru.hardcode.dashboard.service.deadlinerisk;
 
+import java.util.List;
+
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
 /**
@@ -43,7 +45,7 @@ public record DeadlineRiskProperties(
 			bufferHours = 2 * thresholdHours;
 		}
 		if (regression == null) {
-			regression = new Regression(null, null, null, 0.25);
+			regression = new Regression(null, null, null, 0.25, null);
 		}
 		if (reasons == null) {
 			reasons = new Reasons(24.0, 5L);
@@ -69,7 +71,8 @@ public record DeadlineRiskProperties(
 	 * feature clamps fixed by the offline notebook; category boundaries on the raw score are
 	 * inclusive ({@code medium} first, then {@code high}).
 	 */
-	public record Regression(Weights weights, Thresholds thresholds, Clamps clamps, double minRemainingHours) {
+	public record Regression(Weights weights, Thresholds thresholds, Clamps clamps, double minRemainingHours,
+			List<Double> priorityMediansHours) {
 		public Regression {
 			if (weights == null) {
 				weights = new Weights(4.379061, 0.010472, 0.167612, -0.030004, 0.42397,
@@ -81,6 +84,11 @@ public record DeadlineRiskProperties(
 			if (clamps == null) {
 				clamps = new Clamps(new Clamp(0, 100), new Clamp(0, 200), new Clamp(0, 50),
 						new Clamp(0, 20), new Clamp(0, 2160), new Clamp(0, 100), new Clamp(1, 4));
+			}
+			priorityMediansHours = priorityMediansHours == null ? List.of(52.8917, 67.7833, 27.0667, 30.4)
+					: List.copyOf(priorityMediansHours);
+			if (priorityMediansHours.size() != 4 || priorityMediansHours.stream().anyMatch(h -> !Double.isFinite(h) || h <= 0)) {
+				throw new IllegalArgumentException("deadline-risk.regression.priority-medians-hours requires four positive finite hours");
 			}
 			if (!Double.isFinite(minRemainingHours) || minRemainingHours <= 0) {
 				throw new IllegalArgumentException(

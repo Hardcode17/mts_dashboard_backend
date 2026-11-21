@@ -66,20 +66,20 @@ class DeadlineRiskServiceTest {
 
 		// Service 1, priority 4 and Support use the exact median over both group fallbacks.
 		var scoped = captured.get(0);
-		assertThat(scoped.risk()).isEqualTo(DeadlineRiskLevel.LOW);
-		assertThat(scoped.score()).isEqualTo(4.379061 + 0.010472 * 6 + 0.033348 - 2.089877 * 4);
+		assertThat(scoped.risk()).isEqualTo(DeadlineRiskLevel.HIGH);
+		assertThat(scoped.score()).isEqualTo(4.379061 + 0.010472 * 6 + 0.033348 - 2.089877);
 		assertThat(scoped.evaluatedAt()).isEqualTo(NOW);
 
 		// Priority 3 of Support has no scoped median and falls back to the group-wide 42 h.
 		var fallback = captured.get(1);
-		assertThat(fallback.risk()).isEqualTo(DeadlineRiskLevel.LOW);
-		assertThat(fallback.score()).isEqualTo(4.379061 + 0.010472 * 21 + 0.033348 - 2.089877 * 3);
+		assertThat(fallback.risk()).isEqualTo(DeadlineRiskLevel.HIGH);
+		assertThat(fallback.score()).isEqualTo(4.379061 + 0.010472 * 21 + 0.033348 - 2.089877 * 2);
 
-		// No completed history for a group keeps the incident readable as unknown.
-		var unknown = captured.get(3);
-		assertThat(unknown.risk()).isEqualTo(DeadlineRiskLevel.UNKNOWN);
-		assertThat(unknown.score()).isNull();
-		assertThat(unknown.reasons()).contains("\"code\":\"no_history\"");
+		// No local history: MTS P1 maps to UCI 4, whose training median is 30.4 hours.
+		var cold = captured.get(3);
+		assertThat(cold.risk()).isEqualTo(DeadlineRiskLevel.LOW);
+		assertThat(cold.score()).isEqualTo(4.379061 + 0.010472 * 30.4 + 0.033348 - 2.089877 * 4);
+		assertThat(cold.reasons()).contains("training_priority_median");
 	}
 
 	@Test
@@ -92,7 +92,7 @@ class DeadlineRiskServiceTest {
 
 		ArgumentCaptor<List<ScoredRisk>> stored = ArgumentCaptor.forClass(List.class);
 		verify(repository).replaceAll(stored.capture());
-		assertThat(stored.getValue().getFirst().score()).isEqualTo(4.379061 + 0.010472 * 12 + 0.033348 - 2.089877 * 4);
+		assertThat(stored.getValue().getFirst().score()).isEqualTo(4.379061 + 0.010472 * 12 + 0.033348 - 2.089877);
 	}
 
 	@Test

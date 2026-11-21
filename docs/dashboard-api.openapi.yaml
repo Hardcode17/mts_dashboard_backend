@@ -1951,7 +1951,8 @@ components:
       description: |
         Риск нарушения дедлайна (KAN-82). Пересчитывается фоново при каждой публикации снимка
         ITSM для активных инцидентов со сроком; отдельного сервиса нет, модель — константы в
-        конфигурации бэкенда. По умолчанию работает регрессия KAN-81. Режим threshold
+        конфигурации бэкенда. По умолчанию работает регрессия KAN-81. Приоритет P4 (критический) соответствует
+        рангу UCI 1. Пока в ITSM нет истории группы, берётся обучающая медиана этого приоритета. Режим threshold
         оценивает оставшееся время до дедлайна. Оценка только читает данные и не меняет дедлайн, приоритет и
         статус; предупреждение о приближении срока (KAN-46) показывается рядом и отдельно.
         `risk: unknown` — срока нет, карточка завершена или оценка недоступна; карточку не
@@ -1984,7 +1985,7 @@ components:
             properties:
               code:
                 type: string
-                description: 'Стабильный код основания: `remaining_below_threshold`, `remaining_in_buffer`, `group_median`, `group_median_exceeds`, `deadline_extended`, `reassigned`, `reopened`, `status_stale`, `assignee_overloaded`, `no_deadline`, `no_history`, `not_active`, `not_evaluated`.'
+                description: 'Стабильный код основания: `training_priority_median`, `unsupported_priority`, `remaining_below_threshold`, `remaining_in_buffer`, `group_median`, `group_median_exceeds`, `deadline_extended`, `reassigned`, `reopened`, `status_stale`, `assignee_overloaded`, `no_deadline`, `no_history`, `not_active`, `not_evaluated`.'
               text:
                 type: string
         score:

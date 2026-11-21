@@ -72,6 +72,8 @@ deadline-risk:
       x7: {min: 1.0, max: 4.0}
     # Floor for the deadline remainder in x1 so a passed deadline cannot divide by zero.
     min-remaining-hours: 0.25
+    # Training medians by UCI priority (1 = critical, 4 = low), used until local history exists.
+    priority-medians-hours: [52.8917, 67.7833, 27.0667, 30.4]
   # When a feature becomes a named reason of the assessment.
   reasons:
     stale-status-hours: 24

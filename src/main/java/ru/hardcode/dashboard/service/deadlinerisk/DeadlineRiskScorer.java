@@ -19,9 +19,7 @@ import java.util.Locale;
  * resolution time of the resolution group divided by the hours left, x2 — deadline extensions,
  * x3 — reassignments, x4 — reopenings, x5 — hours without a status change, x6 — assignee's
  * open incidents, x7 — the ITSM priority; every feature is clamped to the bounds fixed
- * offline. The score is the raw weighted sum, never a probability. Without a usable group
- * median the main feature is missing and the assessment yields {@code unknown} rather than
- * silently degrading.</li>
+ * offline. The score is the raw weighted sum, never a probability. Without a usable group median, x1 uses the UCI training median for the priority.</li>
  * <li>{@code threshold} (the fallback): the KAN-81 winning baseline — risk is high when less
  * than {@code deadline-risk.threshold-hours} remain until the deadline, medium inside the
  * buffer zone, low above it. The rule needs only the deadline, so a missing group median never
@@ -29,9 +27,7 @@ import java.util.Locale;
  * </ul>
  *
  * <p>An incident without a deadline is never scored: the result is
- * {@link DeadlineRiskLevel#UNKNOWN} with an explanatory reason, and the card keeps working. In
- * the regression mode a missing group median also yields {@code unknown}: the main feature would
- * be unavailable. The scorer only reads ITSM data; it never changes the deadline, priority or
+ * {@link DeadlineRiskLevel#UNKNOWN} with an explanatory reason, and the card keeps working. The scorer only reads ITSM data; it never changes the deadline, priority or
  * state, and it does not replace the remaining-time warning of KAN-46.
  */
 public class DeadlineRiskScorer {
@@ -80,29 +76,28 @@ public class DeadlineRiskScorer {
 	/**
 	 * KAN-81 logistic regression without standardization — the product default: the team
 	 * deliberately prefers the feature-aware forecast; every feature is clamped to the offline
-	 * bounds before the weighted sum. Without a usable group median the main feature is missing
-	 * and the assessment is {@code unknown} rather than silently degraded.
+	 * bounds before the weighted sum.
 	 */
 	private DeadlineRiskResult evaluateRegression(DeadlineRiskInput input, double remaining) {
-		if (input.assignedGroupName() == null) {
-			return DeadlineRiskResult.unknown(List.of(new DeadlineRiskResult.Reason("no_history",
-					"Карточка без назначенной группы — медиана решения недоступна")));
+		if (input.priorityId() < 1 || input.priorityId() > 4) {
+			return DeadlineRiskResult.unknown(List.of(new DeadlineRiskResult.Reason("unsupported_priority",
+					"Приоритет ITSM P%d отсутствует в обучающей шкале".formatted(input.priorityId()))));
 		}
-		if (input.medianResolutionHours() == null || input.medianResolutionHours() <= 0) {
-			return DeadlineRiskResult.unknown(List.of(new DeadlineRiskResult.Reason("no_history",
-					("Нет завершённых карточек группы «%s» — медиана решения недоступна")
-							.formatted(input.assignedGroupName()))));
-		}
+		// MTS P4 is critical; UCI encoded the same severity as 1.
+		int uciPriority = 5 - input.priorityId();
 		var regression = properties.regression();
+		boolean hasGroupMedian = input.assignedGroupName() != null && input.medianResolutionHours() != null
+				&& input.medianResolutionHours() > 0;
+		double median = hasGroupMedian ? input.medianResolutionHours() : regression.priorityMediansHours().get(uciPriority - 1);
 		var clamps = regression.clamps();
-		double x1 = clamp(input.medianResolutionHours()
+		double x1 = clamp(median
 				/ Math.max(remaining, regression.minRemainingHours()), clamps.x1());
 		double x2 = clamp(Math.max(input.deadlineExtensions(), 0), clamps.x2());
 		double x3 = clamp(Math.max(input.reassignments(), 0), clamps.x3());
 		double x4 = clamp(Math.max(input.reopenings(), 0), clamps.x4());
 		double x5 = clamp(staleHours(input.timeSinceStatusChange()), clamps.x5());
 		double x6 = clamp(Math.max(input.assigneeOpenIncidents(), 0), clamps.x6());
-		double x7 = clamp(input.priorityId(), clamps.x7());
+		double x7 = clamp(uciPriority, clamps.x7());
 
 		var weights = regression.weights();
 		double score = weights.w0() + weights.w1() * x1 + weights.w2() * x2 + weights.w3() * x3
@@ -112,7 +107,13 @@ public class DeadlineRiskScorer {
 						: DeadlineRiskLevel.LOW;
 
 		var reasons = new ArrayList<DeadlineRiskResult.Reason>();
-		addMedianGround(input, remaining, reasons);
+		if (hasGroupMedian) {
+			addMedianGround(input, remaining, reasons);
+		} else {
+			reasons.add(new DeadlineRiskResult.Reason("training_priority_median",
+					"Медиана времени решения для P%d по обучающим данным UCI: %s ч".formatted(
+							input.priorityId(), hours(median))));
+		}
 		if (x2 >= 1) {
 			reasons.add(new DeadlineRiskResult.Reason("deadline_extended",
 					"Дедлайн уже продлевался %d %s".formatted((long) x2, times((long) x2))));

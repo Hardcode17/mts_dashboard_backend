@@ -13,7 +13,7 @@ import org.springframework.context.annotation.Primary;
 import ru.hardcode.dashboard.repository.DeadlineRiskRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.closeTo;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -38,9 +38,9 @@ class DeadlineRiskIT extends DashboardIncidentTestSupport {
 				withService(active("INC0000100014", "2026-11-21T13:02:29Z"), "B")) + "]"));
 
 		mvc.perform(authenticatedGet(PATH + "/{id}", "INC0000100013"))
-				.andExpect(status().isOk()).andExpect(jsonPath("$.deadlineRisk.score").value(4.379061 + 0.010472 * 2 - 2.089877 * 4));
+				.andExpect(status().isOk()).andExpect(jsonPath("$.deadlineRisk.score").value(4.379061 + 0.010472 * 2 - 2.089877));
 		mvc.perform(authenticatedGet(PATH + "/{id}", "INC0000100014"))
-				.andExpect(status().isOk()).andExpect(jsonPath("$.deadlineRisk.score").value(4.379061 + 0.010472 * 10 - 2.089877 * 4));
+				.andExpect(status().isOk()).andExpect(jsonPath("$.deadlineRisk.score").value(4.379061 + 0.010472 * 10 - 2.089877));
 	}
 
 	private static String withService(String incident, String service) {
@@ -74,37 +74,37 @@ class DeadlineRiskIT extends DashboardIncidentTestSupport {
 				active("INC0000100002", "2026-11-21T13:02:29Z")) + "]"));
 
 		// The only completed Support×P4 incident took 2 h; one hour is left, so
-		// x1 = 2. Regression yields low while the threshold fallback would yield high.
+		// x1 = 2. MTS P4 maps to UCI critical (1).
 		mvc.perform(authenticatedGet(PATH + "/{id}", "INC0000100002"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.deadlineRisk.risk").value("low"))
+				.andExpect(jsonPath("$.deadlineRisk.risk").value("high"))
 				.andExpect(jsonPath("$.deadlineRisk.evaluatedAt").value(NOW.toString()))
 				.andExpect(jsonPath("$.deadlineRisk.reasons[0].code").value("group_median_exceeds"))
 				.andExpect(jsonPath("$.deadlineRisk.reasons[0].text")
 						.value("Медиана группы решения «Support»: 2.0 ч, остаток 1.0 ч"))
-				.andExpect(jsonPath("$.deadlineRisk.score").value(4.379061 + 0.010472 * 2 - 2.089877 * 4));
+				.andExpect(jsonPath("$.deadlineRisk.score").value(4.379061 + 0.010472 * 2 - 2.089877));
 	}
 
 	@Test
 	void aLaterPublicationRefreshesTheStoredScoring() throws Exception {
 		publish(receive(1, "[" + active("INC0000100003", "2026-11-22T13:02:29Z") + "]"));
 
-		// No completed history for Support yet: the pass stores unknown with the reason.
+		// MTS P4 maps to UCI critical (1). A cold snapshot uses its 52.8917 h training median.
 		mvc.perform(authenticatedGet(PATH + "/{id}", "INC0000100003"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.deadlineRisk.risk").value("unknown"))
-				.andExpect(jsonPath("$.deadlineRisk.reasons[0].code").value("no_history"))
-				.andExpect(jsonPath("$.deadlineRisk.reasons[0].text", containsString("Support")))
-				.andExpect(jsonPath("$.deadlineRisk.score").value(nullValue()));
+				.andExpect(jsonPath("$.priorityId").value(4))
+				.andExpect(jsonPath("$.deadlineRisk.risk").value("high"))
+				.andExpect(jsonPath("$.deadlineRisk.reasons[0].code").value("training_priority_median"))
+				.andExpect(jsonPath("$.deadlineRisk.score", closeTo(4.379061 + 0.010472 * 52.8917 / 25 - 2.089877, 1e-9)));
 
 		publish(receive(2, "[" + String.join(",",
 				completed("INC0000100004", "2026-11-20T08:00:00Z", "2026-11-20T10:00:00Z"),
 				active("INC0000100003", "2026-11-22T13:02:29Z")) + "]"));
 
-		// With the 2 h median and 25 h left: x1 = 0.08, so the P4 incident scores low.
+		// With the 2 h median and 25 h left: x1 = 0.08, the local group median replaces the training median.
 		mvc.perform(authenticatedGet(PATH + "/{id}", "INC0000100003"))
 				.andExpect(status().isOk())
-				.andExpect(jsonPath("$.deadlineRisk.risk").value("low"))
+				.andExpect(jsonPath("$.deadlineRisk.risk").value("high"))
 				.andExpect(jsonPath("$.deadlineRisk.evaluatedAt").value(NOW.toString()))
 				.andExpect(jsonPath("$.deadlineRisk.reasons[0].code").value("group_median"));
 	}
