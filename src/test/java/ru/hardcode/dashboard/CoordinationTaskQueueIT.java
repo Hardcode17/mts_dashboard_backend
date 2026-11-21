@@ -98,21 +98,26 @@ class CoordinationTaskQueueIT {
 				.andExpect(jsonPath("$[0].taskId").isNumber())
 				.andExpect(jsonPath("$[0].incidentId").value("INC2"))
 				.andExpect(jsonPath("$[1].incidentId").value("INC3"));
+		long originalTask = jdbc.queryForObject("SELECT id FROM coordination_tasks WHERE incident_id='INC2'", Long.class);
 		deliver(3, incident("INC1", "Target", "changed"), incident("INC2", "Other", "baseline"),
 				incident("INC3", "Target", "changed"), incident("INC4", "Other", "new"));
+		assertThat(jdbc.queryForObject("SELECT status FROM coordination_tasks WHERE id=?", String.class, originalTask))
+				.isEqualTo("completed");
 		deliver(4, incident("INC1", "Target", "changed"), incident("INC2", "Target", "baseline"),
 				incident("INC3", "Target", "changed"), incident("INC4", "Other", "new"));
-		assertThat(count()).isEqualTo(2);
+		assertThat(count()).isEqualTo(3);
+		assertThat(jdbc.queryForObject("SELECT id FROM coordination_tasks WHERE incident_id='INC2' AND status='open'",
+				Long.class)).isNotEqualTo(originalTask);
 		assertThat(jdbc.queryForObject("SELECT source_data->>'assignedGroupName' FROM itsm_incident WHERE id='INC2'",
 				String.class)).isEqualTo("Target");
 		assertThat(jdbc.queryForObject("SELECT count(*) FROM coordination_tasks WHERE status='open' AND finished_at IS NULL",
 				Long.class)).isEqualTo(2);
 		// Disappearance does not close a task; returning on the target group does not duplicate it.
 		deliver(5, incident("INC1", "Target", "changed"), incident("INC4", "Other", "new"));
-		assertThat(count()).isEqualTo(2);
+		assertThat(count()).isEqualTo(3);
 		deliver(6, incident("INC1", "Target", "changed"), incident("INC2", "Target", "returned"),
 				incident("INC3", "Target", "returned"), incident("INC4", "Other", "new"));
-		assertThat(count()).isEqualTo(2);
+		assertThat(count()).isEqualTo(3);
 	}
 
 	@Test
