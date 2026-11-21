@@ -838,6 +838,13 @@ components:
           type:
             - string
             - 'null'
+        parentId:
+          anyOf:
+            - type: string
+              minLength: 1
+              maxLength: 128
+            - type: 'null'
+          description: 'KAN-66: необязательный строковый `id` непосредственного родителя из того же источника (не `sysId` и не ключ БД). Отсутствие поля сохраняет ранее импортированную связь; `null` снимает её; строка задаёт нового родителя. Ссылка на себя, цикл или родителя вне снимка отклоняет весь снимок.'
         waitingExitDate:
           anyOf:
             - $ref: '#/components/schemas/UtcInstant'

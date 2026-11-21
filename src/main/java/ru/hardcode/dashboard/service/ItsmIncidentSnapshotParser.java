@@ -37,6 +37,7 @@ public class ItsmIncidentSnapshotParser {
 
 	static final String FIELD_DEADLINE = "deadline";
 	static final String FIELD_WAITING_EXIT_DATE = "waitingExitDate";
+	static final String FIELD_PARENT_ID = "parentId";
 	private static final Instant TECHNICAL_DATE = Instant.parse("0001-01-01T00:00:00Z");
 	static final String FIELD_COMPLETION_DATE = "completionDate";
 	static final String FIELD_SOLUTION = "solution";
@@ -108,6 +109,7 @@ public class ItsmIncidentSnapshotParser {
 		if (id == null || id.isBlank()) {
 			throw invalid(index, "id", "must be a non-blank string", null);
 		}
+		validateParentId(index, node);
 		ItsmIncidentState state = parseState(index, node);
 		int priorityId = requiredIntegralInt(index, node, "priorityId");
 		Instant submitDate = requiredTimestamp(index, node, "submitDate");
@@ -155,6 +157,23 @@ public class ItsmIncidentSnapshotParser {
 			}
 		}
 		throw invalid(index, "stateEnum", "must be one of Assigned, WorkInProgress, Resolved, Closed, Research", null);
+	}
+
+	/**
+	 * The parent is optional: an absent field preserves the previously imported relation and an
+	 * explicit null removes it. A present value must be the external incident id of the parent.
+	 */
+	private static void validateParentId(int index, JsonNode node) {
+		JsonNode value = node.get(FIELD_PARENT_ID);
+		if (value == null || value.isNull()) {
+			return;
+		}
+		if (!value.isString()) {
+			throw invalid(index, FIELD_PARENT_ID, "must be a string or null", null);
+		}
+		if (value.stringValue().isBlank()) {
+			throw invalid(index, FIELD_PARENT_ID, "must be a non-blank string", null);
+		}
 	}
 
 	private static String timestampString(Instant instant) {

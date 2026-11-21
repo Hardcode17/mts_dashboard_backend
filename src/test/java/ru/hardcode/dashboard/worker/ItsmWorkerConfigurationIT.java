@@ -58,7 +58,7 @@ class ItsmWorkerConfigurationIT {
 
 		@Test
 		void migrationAddsClaimColumnsWithSafeDefaults() {
-			jdbcTemplate.update("TRUNCATE TABLE itsm_ingest_batch");
+			jdbcTemplate.update("TRUNCATE TABLE itsm_ingest_batch CASCADE");
 			UUID batchId = UUID.randomUUID();
 			Instant now = Instant.now();
 			jdbcTemplate.update(
@@ -120,7 +120,7 @@ class ItsmWorkerConfigurationIT {
 			assertThat(context.getBeanNamesForType(ItsmWorkerSqlRepository.class)).isEmpty();
 			assertThat(context.getBeanNamesForType(ItsmWorkerLink.class)).isEmpty();
 
-			jdbcTemplate.update("TRUNCATE TABLE itsm_ingest_batch");
+			jdbcTemplate.update("TRUNCATE TABLE itsm_ingest_batch CASCADE");
 			UUID batchId = UUID.randomUUID();
 			Instant now = Instant.now();
 			jdbcTemplate.update(

@@ -19,6 +19,8 @@ public enum AppErrors implements AppError {
 			"ITSM snapshot contains duplicate id; record at index ${index} repeats index ${firstIndex}"),
 	ITSM_UNSUPPORTED_SNAPSHOT_VALUE("ITSM_UNSUPPORTED_SNAPSHOT_VALUE", HttpStatus.BAD_REQUEST,
 			"ITSM snapshot contains a string or number that cannot be stored"),
+	ITSM_INVALID_HIERARCHY("ITSM_INVALID_HIERARCHY", HttpStatus.BAD_REQUEST,
+			"ITSM snapshot incident hierarchy is invalid: ${reason}"),
 	ITSM_INCIDENT_SOURCE_CONFLICT("ITSM_INCIDENT_SOURCE_CONFLICT", HttpStatus.CONFLICT,
 			"ITSM snapshot contains an incident owned by another source"),
 	ITSM_IDEMPOTENCY_CONFLICT("ITSM_IDEMPOTENCY_CONFLICT", HttpStatus.CONFLICT, "Idempotency-Key was already used with different request metadata or payload"),

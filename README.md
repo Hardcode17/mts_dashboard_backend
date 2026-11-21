@@ -6,6 +6,9 @@
 
 Понадобятся Docker с Compose v2 и OpenSSL. Из корня репозитория:
 
+Мониторинг возвращает текущие счётчики и фактический таймлайн через `GET /api/dashboard/monitoring/summary`.
+Граф непосредственных связей доступен через `GET /api/incidents/{id}/relationships`. Оба маршрута используют допуск координатора.
+
 ```sh
 runtime_dir="${XDG_CONFIG_HOME:-$HOME/.config}/mcc-dashboard"
 umask 077

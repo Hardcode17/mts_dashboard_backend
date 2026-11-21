@@ -1,6 +1,7 @@
 package ru.hardcode.dashboard.service;
 
 import java.time.Clock;
+import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
@@ -38,28 +39,35 @@ public class ItsmSnapshotPublicationService implements ItsmBatchProcessor {
 			Map.entry("productMasterId", 128), Map.entry("productUrl", 1024),
 			Map.entry("service", 300), Map.entry("serviceId", 128), Map.entry("scenarioName", 300),
 			Map.entry("assignedGroupName", 300), Map.entry("assignedEmployee", 300),
-			Map.entry("assignedEmployeeLogin", 128), Map.entry("initiatorName", 300), Map.entry("initiatorLogin", 128));
+			Map.entry("assignedEmployeeLogin", 128), Map.entry("initiatorName", 300), Map.entry("initiatorLogin", 128),
+			Map.entry(ItsmIncidentSnapshotParser.FIELD_PARENT_ID, 128));
 
 	private final ItsmIncidentSnapshotParser parser;
+	private final ItsmIncidentHierarchyResolver hierarchyResolver;
 	private final ItsmSnapshotPublicationRepository repository;
 	private final ItsmBatchSqlRepository batches;
 	private final ItsmBaselineRepository domain;
 	private final ItsmSnapshotMapper mapper;
 	private final ObjectMapper objectMapper;
 	private final ApplicationEventPublisher events;
+	private final DashboardMonitoringService monitoring;
 	private final Clock clock;
 
 	public ItsmSnapshotPublicationService(ItsmIncidentSnapshotParser parser,
+			ItsmIncidentHierarchyResolver hierarchyResolver,
 			ItsmSnapshotPublicationRepository repository, ItsmBatchSqlRepository batches,
 			ItsmBaselineRepository domain, ItsmSnapshotMapper mapper,
-			ObjectMapper objectMapper, ApplicationEventPublisher events, Clock clock) {
+			ObjectMapper objectMapper, ApplicationEventPublisher events, DashboardMonitoringService monitoring,
+			Clock clock) {
 		this.parser = parser;
+		this.hierarchyResolver = hierarchyResolver;
 		this.repository = repository;
 		this.batches = batches;
 		this.domain = domain;
 		this.mapper = mapper;
 		this.objectMapper = objectMapper;
 		this.events = events;
+		this.monitoring = monitoring;
 		this.clock = clock;
 	}
 
@@ -113,6 +121,19 @@ public class ItsmSnapshotPublicationService implements ItsmBatchProcessor {
 			return;
 		}
 
+		// Validate the whole candidate graph before any write. A rejected hierarchy therefore
+		// leaves the last published snapshot, journal and relations untouched.
+		ItsmIncidentHierarchyResolver.Hierarchy hierarchy;
+		try {
+			hierarchy = hierarchyResolver.resolve(normalized, domain.findImportedHierarchy(work.sourceId()));
+		} catch (AppException exception) {
+			if (exception.getAppError() == AppErrors.ITSM_INVALID_HIERARCHY) {
+				publication.rejectInvalid(exception.getAppError().getCode() + ": " + exception.getMessage());
+				return;
+			}
+			throw exception;
+		}
+
 		restoreLegacyBaseline(work.sourceId(), head.observedVersion());
 		var changes = repository.journalChanges(work.sourceId(), work.sourceVersion(), snapshot,
 				clock.instant(), objectMapper.writeValueAsString(sourceTimes(normalized)));
@@ -131,9 +152,12 @@ public class ItsmSnapshotPublicationService implements ItsmBatchProcessor {
 				.sorted(Comparator.comparing(ItsmIncidentRecord::id)).toList();
 		var mapping = mapper.map(new ItsmIncidentSnapshot(changedRecords));
 		domain.upsertDomain(mapping, work.sourceId(), present, missing);
+		domain.replaceImportedHierarchy(work.sourceId(), hierarchy.linksByChildId());
 		repository.updateObservation(work.sourceId(), work.sourceVersion(), revision, snapshot);
+		Instant appliedAt = clock.instant();
 		domain.updateSnapshot(work.batchId(), work.sourceId(), work.sourceVersion(),
-				ItsmBatchIntakeService.sha256(payload), clock.instant());
+				ItsmBatchIntakeService.sha256(payload), appliedAt);
+		monitoring.recordPublishedSnapshot(work.batchId(), appliedAt);
 		if (!changes.isEmpty()) {
 			publishAfterCommit(new ItsmSnapshotPublished(work.sourceId(), work.sourceVersion(), revision,
 					changes.stream().map(Change::incidentId).collect(Collectors.toSet())));

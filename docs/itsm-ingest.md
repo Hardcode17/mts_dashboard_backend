@@ -188,7 +188,13 @@ each present INC and advances `observedVersion` without new changes or invalidat
 Flyway migration `V2__itsm_ingest_batch.sql` creates `itsm_ingest_batch`. `V2` is used
 because the demo profile already owns `V1`. The table has the key/version uniqueness
 constraints and the basic status/received indexes. `V3` adds worker claims, `V4`
-adds the domain/catalog model, and `V5` adds publication progress and the journal.
+adds the domain/catalog model, `V5` adds publication progress and the journal, and
+`V12` adds the imported one-step `incident_hierarchies` model. The optional snapshot
+`parentId` is the external incident `id` of the parent in the same source; an absent
+field keeps the imported relation, `null` removes it, and a non-null value replaces it.
+The final candidate graph is validated after all rows, so row order cannot hide a
+self-reference, a cycle or an unknown parent. An invalid graph rejects the whole
+snapshot and keeps the last published version.
 An INC is owned by its first source: conflicting observations from another source
 are rejected, rather than overwriting source-managed data.
 

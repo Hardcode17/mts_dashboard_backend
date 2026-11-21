@@ -85,7 +85,7 @@ class ItsmBatchIntakeIT {
 
 	@BeforeEach
 	void setUp() {
-		jdbcTemplate.update("TRUNCATE TABLE itsm_ingest_batch");
+		jdbcTemplate.update("TRUNCATE TABLE itsm_ingest_batch CASCADE");
 		jdbcTemplate.update("""
 				INSERT INTO users(identity_issuer, identity_subject, login, display_name)
 				VALUES ('https://keycloak.test/realms/dashboard', 'kan27-operator', 'operator', 'Test Operator')

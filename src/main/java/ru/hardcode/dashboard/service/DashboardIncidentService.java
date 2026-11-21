@@ -5,10 +5,12 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.time.format.DateTimeParseException;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
 import java.util.EnumSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -21,6 +23,9 @@ import org.springframework.transaction.annotation.Transactional;
 import ru.hardcode.dashboard.dto.DashboardIncidentCardResponse;
 import ru.hardcode.dashboard.dto.DashboardIncidentListResponse;
 import ru.hardcode.dashboard.dto.DashboardIncidentListResponse.Summary;
+import ru.hardcode.dashboard.dto.DashboardIncidentRelationshipResponse;
+import ru.hardcode.dashboard.dto.DashboardIncidentRelationshipResponse.Edge;
+import ru.hardcode.dashboard.dto.DashboardIncidentRelationshipResponse.Node;
 import ru.hardcode.dashboard.dto.ItsmIncidentSnapshot;
 import ru.hardcode.dashboard.entity.ItsmIncidentState;
 import ru.hardcode.dashboard.exception.AppErrors;
@@ -31,6 +36,7 @@ import ru.hardcode.dashboard.repository.DashboardIncidentRepository.IncidentRow;
 import ru.hardcode.dashboard.repository.ItsmBaselineRepository;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
+import ru.hardcode.dashboard.repository.DashboardIncidentRepository.RelationshipNode;
 
 @Service
 public class DashboardIncidentService {
@@ -205,6 +211,52 @@ public class DashboardIncidentService {
 			}
 		}
 		return card(incidentId);
+	}
+
+	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+	public DashboardIncidentRelationshipResponse relationships(String incidentId) {
+		if (!INCIDENT_ID.matcher(incidentId).matches()) {
+			throw new AppException(AppErrors.INVALID_INCIDENT_ID);
+		}
+		var published = repository.publication();
+		if (published.eventSeq() == 0) {
+			throw new DashboardIncidentNotFoundException(incidentId, 0, 0);
+		}
+		var focus = repository.findRelationshipNodes(List.of(incidentId)).stream().findFirst()
+				.orElseThrow(() -> new DashboardIncidentNotFoundException(
+						incidentId, published.eventSeq(), published.revision()));
+
+		var nodes = new LinkedHashMap<String, Node>();
+		nodes.put(focus.id(), toNode(focus));
+		String parentId = repository.findDirectParentId(incidentId).orElse(null);
+		if (parentId != null) {
+			repository.findRelationshipNodes(List.of(parentId)).stream().findFirst()
+					.ifPresent(parent -> nodes.put(parent.id(), toNode(parent)));
+		}
+		List<String> childIds = repository.findDirectChildIds(incidentId);
+		var childRows = new LinkedHashMap<String, RelationshipNode>();
+		repository.findRelationshipNodes(childIds).forEach(child -> childRows.put(child.id(), child));
+		for (String childId : childIds) {
+			RelationshipNode child = childRows.get(childId);
+			if (child != null) {
+				nodes.put(child.id(), toNode(child));
+			}
+		}
+
+		var edges = new ArrayList<Edge>(childIds.size() + 1);
+		if (parentId != null && nodes.containsKey(parentId)) {
+			edges.add(new Edge(parentId, incidentId));
+		}
+		for (String childId : childIds) {
+			if (nodes.containsKey(childId)) {
+				edges.add(new Edge(incidentId, childId));
+			}
+		}
+		return new DashboardIncidentRelationshipResponse(incidentId, List.copyOf(nodes.values()), edges);
+	}
+
+	private static Node toNode(RelationshipNode node) {
+		return new Node(node.id(), node.title(), node.stateEnum(), node.priorityId());
 	}
 
 	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)

@@ -55,7 +55,7 @@ public class HealthSecurityConfiguration {
 					// API clients receive JSON errors instead of the login form redirect.
 					exceptions.defaultAuthenticationEntryPointFor(
 							(request, response, error) -> ApiErrorWriter.write(response, objectMapper, AppErrors.AUTH_REQUIRED),
-							new AndRequestMatcher(HumanApiSecurityConfiguration.DASHBOARD_INCIDENTS, apiAccept));
+							new AndRequestMatcher(HumanApiSecurityConfiguration.DASHBOARD_READS, apiAccept));
 					exceptions.defaultAuthenticationEntryPointFor(errors.authenticationEntryPoint(),
 							request -> request.getRequestURI().startsWith(request.getContextPath() + "/api/"));
 					exceptions.accessDeniedHandler(errors.accessDeniedHandler());

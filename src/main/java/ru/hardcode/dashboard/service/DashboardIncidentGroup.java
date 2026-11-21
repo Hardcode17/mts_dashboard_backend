@@ -54,6 +54,19 @@ enum DashboardIncidentGroup {
 				.map(group -> new Membership(group.key, group.matchedRule)).toList();
 	}
 
+	static CategoryCounts counts(List<IncidentSummary> incidents) {
+		return new CategoryCounts(count(incidents, CRITICAL), count(incidents, HIGH),
+				count(incidents, COORDINATOR), count(incidents, RESEARCH));
+	}
+
+	private static int count(List<IncidentSummary> incidents, DashboardIncidentGroup group) {
+		return (int) incidents.stream().filter(group::matches).count();
+	}
+
+	boolean matches(IncidentSummary incident) {
+		return matches.test(incident);
+	}
+
 	boolean contains(Summary item) {
 		return item.groupMemberships().stream().anyMatch(membership -> key.equals(membership.group()));
 	}
@@ -61,5 +74,8 @@ enum DashboardIncidentGroup {
 	Group summarize(List<Summary> selected, List<Summary> page) {
 		int count = (int) selected.stream().filter(this::contains).count();
 		return new Group(key, title, rule, active, count, page.stream().filter(this::contains).toList(), null);
+	}
+
+	record CategoryCounts(int critical, int high, int coordinators, int research) {
 	}
 }

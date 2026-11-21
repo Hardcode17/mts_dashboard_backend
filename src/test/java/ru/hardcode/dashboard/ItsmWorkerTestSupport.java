@@ -72,10 +72,10 @@ abstract class ItsmWorkerTestSupport {
 		bearerToken = ItsmMachineJwtTestConfiguration.machineToken(jwtEncoder);
 		processor = processorProvider.getIfAvailable();
 		if (processor == null) {
-			jdbcTemplate.update("TRUNCATE TABLE itsm_ingest_batch");
+			jdbcTemplate.update("TRUNCATE TABLE itsm_ingest_batch CASCADE");
 			return;
 		}
-		jdbcTemplate.update("TRUNCATE TABLE itsm_ingest_batch, " + TestItsmBatchProcessor.TABLE);
+		jdbcTemplate.update("TRUNCATE TABLE itsm_ingest_batch, " + TestItsmBatchProcessor.TABLE + " CASCADE");
 		processor.clear();
 	}
 
