@@ -41,6 +41,38 @@ itsm:
       client-id: ${ITSM_INTEGRATION_AUTH_CLIENT_ID:}
       import-role: ${ITSM_INTEGRATION_AUTH_IMPORT_ROLE:itsm:import}
 
+mcp:
+  evidence:
+    # Read-only MCP evidence tools (KAN-39) exist only for one explicit demo mapping.
+    # Blank defaults keep them fail-closed; set every identifier and the bounded observation
+    # window. The tools run on the standard Streamable HTTP MCP transport at POST /mcp/evidence
+    # and only when this mapping is complete (see application-evidence.yaml for the client
+    # identity and the transport switch).
+    demo:
+      scenario-id: ${MCP_EVIDENCE_SCENARIO_ID:}
+      incident-id: ${MCP_EVIDENCE_INCIDENT_ID:}
+      scenario-run-id: ${MCP_EVIDENCE_SCENARIO_RUN_ID:}
+      itsm-service-key: ${MCP_EVIDENCE_ITSM_SERVICE_KEY:}
+      log-service-key: ${MCP_EVIDENCE_LOG_SERVICE_KEY:}
+      database-service-key: ${MCP_EVIDENCE_DATABASE_SERVICE_KEY:}
+      max-window: ${MCP_EVIDENCE_MAX_WINDOW:PT24H}
+      # The only window calls may observe. Keep both blank to use the age below (now-counted,
+      # bounded by max-window); set both as ISO-8601 instants to pin a fixed stand window.
+      observation-window:
+        from: ${MCP_EVIDENCE_WINDOW_FROM:}
+        to: ${MCP_EVIDENCE_WINDOW_TO:}
+      observation-window-age: ${MCP_EVIDENCE_WINDOW_AGE:PT24H}
+      itsm:
+        base-url: ${MCP_EVIDENCE_ITSM_BASE_URL:}
+      log:
+        base-url: ${MCP_EVIDENCE_LOG_BASE_URL:}
+        customer-id: ${MCP_EVIDENCE_LOG_CUSTOMER_ID:}
+      database:
+        url: ${MCP_EVIDENCE_DB_URL:}
+        username: ${MCP_EVIDENCE_DB_USERNAME:}
+        password: ${MCP_EVIDENCE_DB_PASSWORD:}
+        view: ${MCP_EVIDENCE_DB_VIEW:}
+
 logging:
   file:
     name: ./logs/dashboard.log

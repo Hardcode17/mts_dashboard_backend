@@ -22,7 +22,20 @@ public enum AppErrors implements AppError {
 	ITSM_MACHINE_AUTH_REQUIRED("ITSM_MACHINE_AUTH_REQUIRED", HttpStatus.UNAUTHORIZED, "Machine bearer token is required"),
 	ITSM_MACHINE_ACCESS_DENIED("ITSM_MACHINE_ACCESS_DENIED", HttpStatus.FORBIDDEN, "Machine client identity or itsm import permission is missing"),
 	HUMAN_AUTH_REQUIRED("HUMAN_AUTH_REQUIRED", HttpStatus.UNAUTHORIZED, "Human access token is required"),
-	HUMAN_ACCESS_DENIED("HUMAN_ACCESS_DENIED", HttpStatus.FORBIDDEN, "The access token does not grant access to this resource");
+	HUMAN_ACCESS_DENIED("HUMAN_ACCESS_DENIED", HttpStatus.FORBIDDEN, "The access token does not grant access to this resource"),
+	MCP_EVIDENCE_ACCESS_DENIED("MCP_EVIDENCE_ACCESS_DENIED", HttpStatus.FORBIDDEN, "Caller is not allowed to read MCP evidence"),
+	MCP_EVIDENCE_DEMO_SCENARIO_UNKNOWN("MCP_EVIDENCE_DEMO_SCENARIO_UNKNOWN", HttpStatus.NOT_FOUND, "MCP evidence demo scenario ${scenarioId} is not a mapped demo scenario"),
+	MCP_EVIDENCE_INCIDENT_NOT_MAPPED("MCP_EVIDENCE_INCIDENT_NOT_MAPPED", HttpStatus.NOT_FOUND, "Incident ${incidentId} has no explicit mapping to a scenario run"),
+	MCP_EVIDENCE_SCENARIO_RUN_UNKNOWN("MCP_EVIDENCE_SCENARIO_RUN_UNKNOWN", HttpStatus.NOT_FOUND, "Scenario run is not a part of the requested demo mapping"),
+	MCP_EVIDENCE_SERVICE_UNKNOWN("MCP_EVIDENCE_SERVICE_UNKNOWN", HttpStatus.NOT_FOUND, "serviceKey is not one of the services explicitly bound to the scenario run"),
+	MCP_EVIDENCE_WINDOW_INVALID("MCP_EVIDENCE_WINDOW_INVALID", HttpStatus.BAD_REQUEST, "Evidence time window ${from} .. ${to} is invalid or exceeds the ${maxHours}-hour limit"),
+	MCP_EVIDENCE_WINDOW_OUTSIDE_DEMO("MCP_EVIDENCE_WINDOW_OUTSIDE_DEMO", HttpStatus.BAD_REQUEST, "Evidence time window is outside the allowed demo observation window"),
+	MCP_EVIDENCE_SOURCE_UNAVAILABLE("MCP_EVIDENCE_SOURCE_UNAVAILABLE", HttpStatus.BAD_GATEWAY, "Evidence source ${source} is unavailable: ${reason}"),
+	MCP_EVIDENCE_SOURCE_REJECTED("MCP_EVIDENCE_SOURCE_REJECTED", HttpStatus.BAD_GATEWAY, "Evidence source ${source} rejected the fixed read request"),
+	MCP_EVIDENCE_NOT_ATTRIBUTED("MCP_EVIDENCE_NOT_ATTRIBUTED", HttpStatus.BAD_GATEWAY,
+			"Evidence source ${source} returned records that are not attributable to incident ${incidentId} of scenario run ${scenarioRunId}"),
+	MCP_EVIDENCE_OUT_OF_WINDOW("MCP_EVIDENCE_OUT_OF_WINDOW", HttpStatus.BAD_GATEWAY,
+			"Evidence source ${source} returned a record outside the requested evidence window");
 
 	private final String code;
 	private final HttpStatus httpStatus;

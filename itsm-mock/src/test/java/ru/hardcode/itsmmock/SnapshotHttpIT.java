@@ -81,6 +81,18 @@ class SnapshotHttpIT {
         assertThat(initial.get(0).get("deadline").isNull()).isTrue();
         assertThat(initial.get(0).get("stateReasonId").isString()).isTrue();
 
+        // The stand incident contract is a fixed read back of the assigned group.
+        String incidentId = initial.get(0).get("id").asString();
+        mvc.perform(get("/api/mock/incidents/{id}", incidentId)).andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(incidentId))
+                .andExpect(jsonPath("$.assignedGroupName").value(initial.get(0).get("assignedGroupName").asString()))
+                .andExpect(jsonPath("$.stateEnum").value(initial.get(0).get("stateEnum").asString()))
+                .andExpect(jsonPath("$.lastAssignmentAt").value(initial.get(0).get("lastAssignmentToTeamDateTime").asString()))
+                .andExpect(jsonPath("$.description").doesNotExist())
+                .andExpect(jsonPath("$.assignedEmployeeId").doesNotExist());
+        mvc.perform(get("/api/mock/incidents/{id}", "INC-missing")).andExpect(status().isNotFound());
+        assertThat(REQUESTS).hasSize(3);
+
         var scheduled = ControlledScheduler.callback(taskScheduler);
         scheduled.run();
         scheduled.run();

@@ -1,0 +1,13 @@
+# Enable the dedicated evidence servlet, without exposing Spring AI's general MCP server.
+spring:
+  ai:
+    mcp:
+      server:
+        enabled: false
+mcp:
+  evidence:
+    enabled: true
+    client:
+      audience: ${MCP_EVIDENCE_CLIENT_AUDIENCE:}
+      client-id: ${MCP_EVIDENCE_CLIENT_ID:}
+      role: ${MCP_EVIDENCE_CLIENT_ROLE:itsm:evidence:read}

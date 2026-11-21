@@ -104,6 +104,11 @@ final class SnapshotSender {
         return currentStatus;
     }
 
+    /** The incidents of the latest snapshot (generated before it is delivered). */
+    synchronized List<Map<String, Object>> rows() {
+        return List.copyOf(state.rows());
+    }
+
     private void updateStatus(String reason) {
         var pending = state.pending();
         currentStatus = new Status(state.sourceId(), state.deliveredVersion(),
