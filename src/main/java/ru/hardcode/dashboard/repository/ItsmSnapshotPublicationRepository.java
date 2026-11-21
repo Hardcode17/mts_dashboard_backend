@@ -1,6 +1,7 @@
 package ru.hardcode.dashboard.repository;
 
 import java.util.List;
+import java.util.Set;
 
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Repository;
@@ -59,6 +60,23 @@ public class ItsmSnapshotPublicationRepository {
 				""", Boolean.class, snapshot, sourceId));
 	}
 
+	public byte[] legacyPayload(String sourceId, long observedVersion) {
+		return jdbc.query("""
+				SELECT batch.payload FROM itsm_ingest_batch AS batch
+				WHERE batch.source_id = ? AND batch.source_version = ?
+				  AND EXISTS (SELECT 1 FROM itsm_incident WHERE source_id = ? AND source_data IS NULL)
+				""", (rs, n) -> rs.getBytes("payload"), sourceId, observedVersion, sourceId).stream()
+				.findFirst().orElse(null);
+	}
+
+	public void restoreLegacySourceData(String sourceId, String snapshot) {
+		jdbc.update("""
+				UPDATE itsm_incident AS incident SET source_data = doc
+				FROM jsonb_array_elements(?::jsonb) AS doc
+				WHERE incident.source_id = ? AND incident.id = doc->>'id' AND incident.source_data IS NULL
+				""", snapshot, sourceId);
+	}
+
 	/**
 	 * Diff normalized JSON as JSONB so property order and equivalent numeric values do not produce
 	 * changes. A complete observation updates last_seen_version even when the change revision stays
@@ -69,7 +87,17 @@ public class ItsmSnapshotPublicationRepository {
 				WITH incoming AS (
 				    SELECT doc->>'id' AS incident_id, doc FROM jsonb_array_elements(?::jsonb) AS doc
 				), old AS (
-				    SELECT id AS incident_id, source_data, present_in_source
+				    SELECT id AS incident_id, source_data, present_in_source,
+				           CASE WHEN source_data IS NULL THEN
+				               jsonb_build_object('id', id, 'stateEnum', state, 'priorityId', priority_id,
+				                   'submitDate', submit_date, 'lastAssignmentToTeamDateTime', last_assignment_to_team_at,
+				                   'deadline', deadline, 'completionDate', completion_date,
+				                   'waitingExitDate', waiting_exit_date, 'solution', solution)
+				               || coalesce((SELECT jsonb_object_agg(attribute_name,
+				                       CASE value_type WHEN 'NUMBER' THEN to_jsonb(number_value)
+				                           WHEN 'BOOLEAN' THEN to_jsonb(boolean_value) ELSE to_jsonb(string_value) END)
+				                   FROM itsm_incident_attribute WHERE incident_id = itsm_incident.id), '{}'::jsonb)
+				           END AS legacy_data
 				    FROM itsm_incident WHERE source_id = ?
 				), changes AS MATERIALIZED (
 				    SELECT coalesce(incoming.incident_id, old.incident_id) AS incident_id,
@@ -77,7 +105,7 @@ public class ItsmSnapshotPublicationRepository {
 				                WHEN incoming.incident_id IS NULL THEN 'MISSING'
 				                WHEN NOT old.present_in_source THEN 'RETURNED'
 				                ELSE 'UPDATED' END AS kind,
-				           CASE WHEN old.present_in_source THEN old.source_data END AS before_data,
+				           CASE WHEN old.present_in_source THEN coalesce(old.source_data, old.legacy_data) END AS before_data,
 				           incoming.doc AS after_data
 				    FROM incoming FULL JOIN old USING (incident_id)
 				    WHERE (incoming.incident_id IS NOT NULL AND (
@@ -139,6 +167,16 @@ public class ItsmSnapshotPublicationRepository {
 				rs.getObject("waiting_for_version", Long.class)), sourceId, sourceId, sourceId);
 	}
 
+	public List<CommittedChange> findChangesAfter(long revision, int limit) {
+		return jdbc.query("""
+				SELECT change_revision, source_id, source_version, array_agg(incident_id) AS incident_ids
+				FROM itsm_incident_change WHERE change_revision > ?
+				GROUP BY change_revision, source_id, source_version
+				ORDER BY change_revision LIMIT ?
+				""", (rs, n) -> new CommittedChange(rs.getString("source_id"), rs.getLong("source_version"),
+				rs.getLong("change_revision"), Set.of((String[]) rs.getArray("incident_ids").getArray())), revision, limit);
+	}
+
 	public record SourceHead(Long observedVersion, Long changeRevision) {
 	}
 
@@ -146,5 +184,8 @@ public class ItsmSnapshotPublicationRepository {
 	}
 
 	public record SourceStatus(Long observedVersion, Long changeRevision, Long waitingForVersion) {
+	}
+
+	public record CommittedChange(String sourceId, long sourceVersion, long revision, Set<String> incidentIds) {
 	}
 }

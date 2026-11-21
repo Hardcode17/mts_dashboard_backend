@@ -58,6 +58,14 @@ Machine-authenticated metadata endpoint. Returns `200` with `batchId`, `sourceId
 `404 ITSM_BATCH_NOT_FOUND`. A semantic error in an accepted payload produces a
 terminal `FAILED` with a safe diagnostic, not HTTP `422` on the POST.
 
+### `POST /api/integrations/itsm/batches/{batchId}/retry`
+
+With the machine token, an operator can requeue a technical `FAILED` batch
+after fixing the underlying problem and after automatic retries are exhausted.
+The same ID, body and version are retained; the response is `202` with the same
+`Location`. A semantic rejection, scheduled retry, or already active/successful
+batch returns `409`.
+
 ### `GET /api/snapshot/status`
 
 Uses the existing authenticated application chain (not the machine chain). Returns:
@@ -147,6 +155,10 @@ An explicitly awaited predecessor can use one additional slot to unblock a full
 queue when capacity is nonzero. A terminal `FAILED` batch keeps its diagnostic
 and releases its slot.
 
+During a new source's first publication, a new POST for that source can receive
+`429 ITSM_SOURCE_INITIALIZING` instead of waiting for the publication transaction.
+Retry with identical headers and body. An already accepted exact replay still returns `202`.
+
 ## Worker update contract
 
 Common processing fields on the existing row:
@@ -166,8 +178,9 @@ KAN-55 compares normalized records by string ID and keeps the last source values
 when an INC goes missing. Disappearance does not change its ITSM status.
 Source data and local state are stored separately. Current data, the journal of
 before/after values, and batch success commit in one transaction. After commit,
-`ItsmSnapshotPublished` identifies the affected incidents and the journal revision
-for downstream card and group projections. An unchanged full snapshot confirms
+`ItsmSnapshotPublished` is a wake-up signal for downstream card and group projections.
+Consumers replay the durable journal in revision order via `changesAfter` if a
+signal was missed or arrived out of order. An unchanged full snapshot confirms
 each present INC and advances `observedVersion` without new changes or invalidations.
 
 ## Database

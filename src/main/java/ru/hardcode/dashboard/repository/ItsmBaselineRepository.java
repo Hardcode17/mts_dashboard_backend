@@ -243,8 +243,7 @@ public class ItsmBaselineRepository {
 			Long id = jdbcClient.sql("""
 					INSERT INTO itsm_catalog_product (product_key, external_product_id, product_master_id, product_url)
 					VALUES (?, ?, ?, ?)
-					ON CONFLICT (product_key) DO UPDATE SET external_product_id = EXCLUDED.external_product_id,
-					    product_master_id = EXCLUDED.product_master_id, product_url = EXCLUDED.product_url
+					ON CONFLICT (product_key) DO UPDATE SET product_key = EXCLUDED.product_key
 					RETURNING id
 					""")
 					.param(product.productKey())
@@ -265,7 +264,7 @@ public class ItsmBaselineRepository {
 			Long id = jdbcClient.sql("""
 					INSERT INTO itsm_catalog_service (product_id, service_key, external_service_id)
 					VALUES (?, ?, ?)
-					ON CONFLICT (product_id, service_key) DO UPDATE SET external_service_id = EXCLUDED.external_service_id
+					ON CONFLICT (product_id, service_key) DO UPDATE SET service_key = EXCLUDED.service_key
 					RETURNING id
 					""")
 					.param(productId)
@@ -314,7 +313,7 @@ public class ItsmBaselineRepository {
 			Long id = jdbcClient.sql("""
 					INSERT INTO itsm_external_person (external_login, display_name)
 					VALUES (?, ?)
-					ON CONFLICT (external_login) DO UPDATE SET display_name = EXCLUDED.display_name
+					ON CONFLICT (external_login) DO UPDATE SET external_login = EXCLUDED.external_login
 					RETURNING id
 					""")
 					.param(person.externalLogin())

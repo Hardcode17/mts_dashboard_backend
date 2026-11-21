@@ -31,7 +31,7 @@ info:
     - **Nullable-поля** объявлены явно: `deadline` (карточка без срока), `completionDate` и
       `solution` (только у завершённых), `stateReason`, `lastAssignmentToTeamDateTime`,
       `group.fixed`, а также `revision` у источника до первой публикации.
-    - **`revision`** — опубликованная версия источника, то же значение, что в
+    - **`revision`** — опубликованная ревизия изменений, то же значение, что в
       `GET /api/snapshot/status`. «Снимок revision 42» означает, что блок ответа построен ровно
       из этой публикации.
     - **`eventSeq`** — счётчик изменений опубликованных данных, версия блока статуса. Его
@@ -695,7 +695,7 @@ paths:
       operationId: listSources
       summary: Статус источников и свежесть публикации (KAN-7)
       description: |
-        Все источники, включая stale. `revision` — опубликованная версия,
+        Все источники, включая stale. `revision` — опубликованная ревизия изменений,
         `sourceVersion` — последняя доставка (не путать ни с `revision`, ни с `eventSeq`). `stale` —
         `true`, пока последняя доставка не опубликована, или последний приём старше
         `staleAfterSeconds` (при снимке каждые 30 с — пропуск до трёх тиков).
@@ -1222,7 +1222,7 @@ components:
           $ref: '#/components/schemas/EventSeq'
         revision:
           $ref: '#/components/schemas/PublishedRevision'
-          description: Глобальная опубликованная версия для интерфейса.
+          description: Глобальная опубликованная ревизия изменений для интерфейса.
         sources:
           type: array
           items:

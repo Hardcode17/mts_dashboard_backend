@@ -22,6 +22,10 @@ CREATE INDEX ix_itsm_ingest_batch_applied_revision
 
 CREATE SEQUENCE itsm_snapshot_change_revision;
 
+SELECT setval('itsm_snapshot_change_revision', greatest(coalesce(max(processing_revision), 1), 1),
+              coalesce(max(processing_revision), 0) > 0)
+FROM itsm_ingest_batch WHERE status = 'SUCCEEDED' AND processed_at IS NOT NULL;
+
 CREATE TABLE itsm_snapshot_source (
     source_id VARCHAR(128) PRIMARY KEY,
     observed_version BIGINT,
@@ -32,7 +36,11 @@ CREATE TABLE itsm_snapshot_source (
 );
 
 INSERT INTO itsm_snapshot_source (source_id, observed_version, change_revision)
-SELECT source_id, source_version, nextval('itsm_snapshot_change_revision') FROM itsm_snapshot;
+SELECT snapshot.source_id, snapshot.source_version,
+       coalesce(batch.processing_revision, nextval('itsm_snapshot_change_revision'))
+FROM itsm_snapshot AS snapshot
+LEFT JOIN itsm_ingest_batch AS batch ON batch.id = snapshot.batch_id
+    AND batch.status = 'SUCCEEDED' AND batch.processed_at IS NOT NULL;
 
 ALTER TABLE itsm_incident
     ADD COLUMN source_id VARCHAR(128),

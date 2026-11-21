@@ -23,8 +23,10 @@ import ru.hardcode.dashboard.exception.AppException;
 import ru.hardcode.dashboard.exception.AppErrors;
 import ru.hardcode.dashboard.exception.ItsmRecordValidationException;
 import tools.jackson.core.JacksonException;
+import tools.jackson.databind.DeserializationFeature;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
+import tools.jackson.databind.ObjectReader;
 
 /**
  * Decodes a full ITSM snapshot into normalized records. An invalid record or duplicate ID
@@ -43,10 +45,10 @@ public class ItsmIncidentSnapshotParser {
 	private static final String REASON_NOT_OBJECT = "must be a JSON object";
 	private static final List<ItsmIncidentState> KNOWN_STATES = List.of(ItsmIncidentState.values());
 
-	private final ObjectMapper objectMapper;
+	private final ObjectReader reader;
 
 	public ItsmIncidentSnapshotParser(ObjectMapper objectMapper) {
-		this.objectMapper = objectMapper;
+		this.reader = objectMapper.reader().with(DeserializationFeature.USE_BIG_DECIMAL_FOR_FLOATS);
 	}
 
 	/**
@@ -61,7 +63,7 @@ public class ItsmIncidentSnapshotParser {
 			throw new AppException(AppErrors.ITSM_INVALID_PAYLOAD);
 		}
 		try {
-			return parseTree(objectMapper.readTree(body));
+			return parseTree(reader.readTree(body));
 		} catch (JacksonException exception) {
 			throw new AppException(AppErrors.ITSM_INVALID_PAYLOAD, exception);
 		}
@@ -75,7 +77,7 @@ public class ItsmIncidentSnapshotParser {
 			throw new AppException(AppErrors.ITSM_INVALID_PAYLOAD);
 		}
 		try {
-			return parseTree(objectMapper.readTree(body));
+			return parseTree(reader.readTree(body));
 		} catch (JacksonException exception) {
 			throw new AppException(AppErrors.ITSM_INVALID_PAYLOAD, exception);
 		}
@@ -231,6 +233,9 @@ public class ItsmIncidentSnapshotParser {
 			}
 			if (!ZoneOffset.UTC.equals(offset)) {
 				throw invalid(index, field, "must be UTC (offset Z or +00:00)", null);
+			}
+			if (dateTime.getYear() < 1 || dateTime.getYear() > 9999) {
+				throw invalid(index, field, "must have a year between 0001 and 9999", null);
 			}
 			if (dateTime.getNano() % 1_000 != 0) {
 				throw invalid(index, field, "must not have sub-microsecond precision", null);

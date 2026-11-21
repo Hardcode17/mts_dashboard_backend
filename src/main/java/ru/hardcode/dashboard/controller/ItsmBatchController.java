@@ -41,6 +41,16 @@ public class ItsmBatchController {
 			@RequestBody(required = false) byte[] body
 	) {
 		UUID batchId = intakeService.receive(idempotencyKey, sourceId, sourceVersion, body);
+		return accepted(batchId);
+	}
+
+	@PostMapping("/{batchId}/retry")
+	public ResponseEntity<ItsmBatchAcceptedResponse> retry(@PathVariable("batchId") UUID batchId) {
+		intakeService.retry(batchId);
+		return accepted(batchId);
+	}
+
+	private static ResponseEntity<ItsmBatchAcceptedResponse> accepted(UUID batchId) {
 		return ResponseEntity.accepted()
 				.location(URI.create("/api/integrations/itsm/batches/" + batchId))
 				.body(new ItsmBatchAcceptedResponse(batchId));

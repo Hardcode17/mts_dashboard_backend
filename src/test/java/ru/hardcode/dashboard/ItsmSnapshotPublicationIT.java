@@ -6,10 +6,14 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
+import javax.sql.DataSource;
 
+import org.flywaydb.core.Flyway;
+import org.flywaydb.core.api.MigrationVersion;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
@@ -17,19 +21,29 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.event.EventListener;
 import org.springframework.http.HttpHeaders;
+import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.jdbc.datasource.DriverManagerDataSource;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.PlatformTransactionManager;
 import ru.hardcode.dashboard.client.ItsmMachineJwtTestConfiguration;
+import ru.hardcode.dashboard.repository.ItsmSnapshotPublicationRepository;
 import ru.hardcode.dashboard.service.ItsmIncidentSnapshotParser;
+import ru.hardcode.dashboard.service.ItsmSnapshotPublicationService;
 import ru.hardcode.dashboard.service.ItsmSnapshotPublished;
 import ru.hardcode.dashboard.worker.ItsmWorkerRunner;
+import ru.hardcode.dashboard.worker.ItsmWorkerSqlRepository;
+import ru.hardcode.dashboard.worker.ItsmWorkerTransactionService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
@@ -43,6 +57,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 		"itsm.worker.workers=2",
 		"itsm.worker.poll-interval=PT0.05S",
 		"itsm.worker.retry-base-delay=PT2S",
+		"itsm.worker.max-attempts=2",
 		"itsm.intake.max-outstanding-batches=3",
 		"spring.security.user.name=operator",
 		"spring.security.user.password=publication-test"
@@ -61,8 +76,17 @@ class ItsmSnapshotPublicationIT extends ItsmWorkerTestSupport {
 	@Autowired
 	private PublishedEvents events;
 
+	@Autowired
+	private DataSource dataSource;
+
+	@Autowired
+	private ItsmSnapshotPublicationService publicationService;
+
 	@MockitoSpyBean
 	private ItsmIncidentSnapshotParser parser;
+
+	@MockitoSpyBean
+	private ItsmSnapshotPublicationRepository publicationRepository;
 
 	@BeforeEach
 	void reset() {
@@ -118,7 +142,7 @@ class ItsmSnapshotPublicationIT extends ItsmWorkerTestSupport {
 				.andExpect(jsonPath("$.snapshot.sourceVersion").value(2))
 				.andExpect(jsonPath("$.count").value(3))
 				.andExpect(jsonPath("$.incidents[*].id", org.hamcrest.Matchers.containsInAnyOrder("A", "B", "D")))
-				.andExpect(jsonPath("$.incidents[?(@.id == 'A')].assignedPersonId").value(java.util.Collections.singletonList(null)));
+				.andExpect(jsonPath("$.incidents[?(@.id == 'A')].assignedPersonId").value((Object) null));
 
 		runner.stop();
 		runner.start();
@@ -129,6 +153,10 @@ class ItsmSnapshotPublicationIT extends ItsmWorkerTestSupport {
 		assertThat(changes(3)).isEmpty();
 		assertThat(revision()).isEqualTo(changedRevision);
 		assertThat(events).hasSize(2);
+		// Replay is reliable even if the process didn't receive any wake-up events.
+		events.clear();
+		assertThat(publicationService.changesAfter(initialRevision, 1))
+				.containsExactly(new ItsmSnapshotPublished(SOURCE, 2, changedRevision, java.util.Set.of("A", "C", "D")));
 		sourceStatus().andExpect(jsonPath("$.observedVersion").value(3));
 	}
 
@@ -160,6 +188,88 @@ class ItsmSnapshotPublicationIT extends ItsmWorkerTestSupport {
 		acceptSnapshot(BATCH_C, 3, snapshot(inc("A", "\"valid after rejection\"")));
 		awaitSuccess(BATCH_C);
 		assertThat(employee()).isEqualTo("valid after rejection");
+	}
+
+	@Test
+	void outOfRangeDateFailsWithoutBlockingTheNextVersion() throws Exception {
+		runner.start();
+		acceptSnapshot(BATCH_A, 1, snapshot(inc("A", "\"original\"")));
+		awaitSuccess(BATCH_A);
+		acceptSnapshot(BATCH_B, 2, snapshot(inc("A", "\"invalid date\"")
+				.replace("2026-11-21T02:00:00Z", "+300000-01-01T00:00:00Z")));
+		awaitTerminal(BATCH_B);
+		mockMvc.perform(getBatch(BATCH_B)).andExpect(status().isOk())
+				.andExpect(jsonPath("$.status").value("FAILED"))
+				.andExpect(jsonPath("$.nextAttemptAt").value(nullValue()))
+				.andExpect(jsonPath("$.diagnostic").value(
+						"ITSM_INVALID_RECORD: ITSM record in snapshot at index 0 has invalid field submitDate: must have a year between 0001 and 9999"));
+		mockMvc.perform(retry(BATCH_B)).andExpect(status().isConflict())
+				.andExpect(jsonPath("$.code").value("ITSM_BATCH_NOT_RETRYABLE"));
+		acceptSnapshot(BATCH_C, 3, snapshot(inc("A", "\"valid date\"")));
+		awaitSuccess(BATCH_C);
+		assertThat(employee()).isEqualTo("valid date");
+	}
+
+	@Test
+	void exactDecimalChangeIsJournaledButEquivalentRepresentationIsNot() throws Exception {
+		runner.start();
+		acceptSnapshot(BATCH_A, 1, snapshot(withDecimal("0.123456789012345678")));
+		awaitSuccess(BATCH_A);
+		acceptSnapshot(BATCH_B, 2, snapshot(withDecimal("0.123456789012345679")));
+		awaitSuccess(BATCH_B);
+		long changeRevision = revision();
+		assertThat(jdbcTemplate.queryForMap("""
+				SELECT before_data->>'metric' AS before, after_data->>'metric' AS after
+				FROM itsm_incident_change WHERE source_id = ? AND source_version = 2
+				""", SOURCE)).containsEntry("before", "0.123456789012345678")
+				.containsEntry("after", "0.123456789012345679");
+		acceptSnapshot(BATCH_C, 3, snapshot(withDecimal("0.1234567890123456790")));
+		awaitSuccess(BATCH_C);
+		assertThat(revision()).isEqualTo(changeRevision);
+		assertThat(changes(3)).isEmpty();
+	}
+
+	@Test
+	void snapshotReorderingDoesNotRewriteSharedIdentityForUnchangedIncidents() throws Exception {
+		runner.start();
+		String a = inc("A", "\"display A\"").replace("\"assignedEmployeeLogin\":\"display A\"", "\"assignedEmployeeLogin\":\"shared\"");
+		String b = inc("B", "\"display B\"").replace("\"assignedEmployeeLogin\":\"display B\"", "\"assignedEmployeeLogin\":\"shared\"");
+		acceptSnapshot(BATCH_A, 1, snapshot(a, b, inc("C", "\"before\"")));
+		awaitSuccess(BATCH_A);
+		acceptSnapshot(BATCH_B, 2, snapshot(b, a, inc("C", "\"after\"")));
+		awaitSuccess(BATCH_B);
+		assertThat(changes(2)).containsExactly("C:UPDATED");
+		assertThat(jdbcTemplate.queryForObject(
+				"SELECT display_name FROM itsm_external_person WHERE external_login = 'shared'", String.class))
+				.isEqualTo("display A");
+	}
+
+	@Test
+	void intakeDoesNotAcceptAnEarlierVersionHalfwayThroughInitialPublication() throws Exception {
+		CountDownLatch checked = new CountDownLatch(1);
+		CountDownLatch release = new CountDownLatch(1);
+		doAnswer(invocation -> {
+			Object result = invocation.callRealMethod();
+			checked.countDown();
+			if (!release.await(AWAIT_SECONDS, TimeUnit.SECONDS)) {
+				throw new IllegalStateException("test gate timed out");
+			}
+			return result;
+		}).when(publicationRepository).firstUnsettledVersion(eq(SOURCE), isNull(), eq(3L));
+
+		runner.start();
+		try {
+			acceptSnapshot(BATCH_C, 3, "[]");
+			assertThat(checked.await(AWAIT_SECONDS, TimeUnit.SECONDS)).isTrue();
+			mockMvc.perform(postBatch(BATCH_B, SOURCE, 2).content("[]"))
+					.andExpect(status().isTooManyRequests())
+					.andExpect(jsonPath("$.code").value("ITSM_SOURCE_INITIALIZING"));
+			assertThat(count()).isEqualTo(1L);
+			acceptSnapshot(BATCH_C, 3, "[]"); // a replay remains available even during publication
+		} finally {
+			release.countDown();
+		}
+		awaitSuccess(BATCH_C);
 	}
 
 	@Test
@@ -296,6 +406,114 @@ class ItsmSnapshotPublicationIT extends ItsmWorkerTestSupport {
 		assertThat(employee()).isEqualTo("third");
 	}
 
+	@Test
+	void manuallyRequeuesExhaustedTechnicalFailureSoSuccessorsCanProceed() throws Exception {
+		runner.start();
+		acceptSnapshot(BATCH_A, 1, snapshot(inc("A", "\"initial\"")));
+		awaitSuccess(BATCH_A);
+		jdbcTemplate.execute("""
+				ALTER TABLE itsm_incident ADD CONSTRAINT test_exhaust_attempts
+				    CHECK (source_data->>'assignedEmployee' IS DISTINCT FROM 'cannot write')
+				""");
+		try {
+			acceptSnapshot(BATCH_B, 2, snapshot(inc("A", "\"cannot write\"")));
+			acceptSnapshot(BATCH_C, 3, snapshot(inc("A", "\"third\"")));
+			await("technical retries exhausted", () -> {
+				var failed = row(BATCH_B);
+				return "FAILED".equals(failed.get("status")) && failed.get("next_attempt_at") == null;
+			});
+			await("successor waits for the failed version", () -> Long.valueOf(2).equals(waitingFor(BATCH_C)));
+		} finally {
+			jdbcTemplate.execute("ALTER TABLE itsm_incident DROP CONSTRAINT test_exhaust_attempts");
+		}
+		mockMvc.perform(retry(BATCH_B)).andExpect(status().isAccepted())
+				.andExpect(header().string(HttpHeaders.LOCATION, BATCH_PATH + "/" + BATCH_B));
+		awaitSuccess(BATCH_C);
+		assertThat(changes(2)).containsExactly("A:UPDATED");
+		assertThat(changes(3)).containsExactly("A:UPDATED");
+	}
+
+	@Test
+	void canonicalOpenApiExamplesAreAppliedByTheProductionWorker() throws Exception {
+		runner.start();
+		acceptSnapshot(BATCH_A, 42, fixture("/openapi/synthetic/snapshot-minimal.json"));
+		awaitSuccess(BATCH_A);
+		acceptSnapshot(BATCH_B, 43, fixture("/openapi/synthetic/snapshot-next-tick.json"));
+		awaitSuccess(BATCH_B);
+		assertThat(changes(43)).containsExactly("INC000021095533:UPDATED");
+	}
+
+	@Test
+	void upgradesAnInstalledV4BaselineWithoutFalseChangesOrRevisionRegression() throws Exception {
+		var pool = (com.zaxxer.hikari.HikariDataSource) dataSource;
+		String schema = "kan55_upgrade";
+		String url = pool.getJdbcUrl();
+		Flyway.configure().dataSource(url, pool.getUsername(), pool.getPassword()).schemas(schema)
+				.locations("classpath:db/migration").target(MigrationVersion.fromVersion("4")).load().migrate();
+		String schemaUrl = url + (url.contains("?") ? "&" : "?") + "currentSchema=" + schema;
+		var legacyJdbc = new JdbcTemplate(new DriverManagerDataSource(schemaUrl, pool.getUsername(), pool.getPassword()));
+		String original = snapshot(inc("A", "\"Alex\""), inc("C", "\"C\""));
+		insertBatch(legacyJdbc, BATCH_A, 42, original);
+		legacyJdbc.update("""
+				UPDATE itsm_ingest_batch SET status = 'SUCCEEDED', processing_revision = 42,
+				    processed_at = now() WHERE id = ?
+				""", BATCH_A);
+		legacyJdbc.update("INSERT INTO itsm_catalog_product (product_key) VALUES ('Test product')");
+		legacyJdbc.update("""
+				INSERT INTO itsm_incident (id, state, priority_id, submit_date, product_id)
+				SELECT ids.id, 'Assigned', 4, timestamptz '2026-11-21 02:00:00+00', product.id
+				FROM (VALUES ('A'), ('C')) AS ids(id) CROSS JOIN itsm_catalog_product AS product
+				""");
+		legacyJdbc.update("""
+				INSERT INTO itsm_snapshot (batch_id, source_id, source_version, payload_sha256, incident_count, applied_at)
+				VALUES (?, ?, 42, ?, 2, now())
+				""", BATCH_A, SOURCE, "0".repeat(64));
+		try (var context = new SpringApplicationBuilder(DashboardApplication.class).profiles("work").run(
+				"--server.port=0", "--itsm.worker.enabled=false",
+				"--spring.datasource.url=" + schemaUrl, "--spring.datasource.username=" + pool.getUsername(),
+				"--spring.datasource.password=" + pool.getPassword())) {
+			var jdbc = context.getBean(JdbcTemplate.class);
+			var worker = new ItsmWorkerTransactionService(new ItsmWorkerSqlRepository(jdbc),
+					context.getBean(PlatformTransactionManager.class));
+			var processor = context.getBean(ItsmSnapshotPublicationService.class);
+
+			insertBatch(jdbc, BATCH_B, 43, original);
+			assertThat(worker.claimAndProcess(processor, "upgrade-test").batchId()).isEqualTo(BATCH_B);
+			assertThat(jdbc.queryForObject("SELECT count(*) FROM itsm_incident_change", Long.class)).isZero();
+			assertThat(jdbc.queryForObject("SELECT processing_revision FROM itsm_ingest_batch WHERE id = ?",
+					Long.class, BATCH_B)).isEqualTo(42L);
+
+			insertBatch(jdbc, BATCH_C, 44, snapshot(inc("A", "\"Alex\"")));
+			assertThat(worker.claimAndProcess(processor, "upgrade-test").batchId()).isEqualTo(BATCH_C);
+			assertThat(jdbc.queryForMap("""
+					SELECT change_kind, change_revision, before_data->>'assignedEmployee' AS before
+					FROM itsm_incident_change
+					""")).containsEntry("change_kind", "MISSING")
+					.containsEntry("change_revision", 43L).containsEntry("before", "C");
+		}
+	}
+
+	private static void insertBatch(JdbcTemplate jdbc, UUID id, long version, String snapshot) {
+		byte[] body = snapshot.getBytes(java.nio.charset.StandardCharsets.UTF_8);
+		jdbc.update("""
+				INSERT INTO itsm_ingest_batch (id, source_id, source_version, payload, payload_sha256,
+				                              payload_size, received_at, status, status_updated_at)
+				VALUES (?, ?, ?, ?, ?, ?, now(), 'RECEIVED', now())
+				""", id, SOURCE, version, body, "0".repeat(64), body.length);
+	}
+
+	private org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder retry(UUID batchId) {
+		return post(BATCH_PATH + "/" + batchId + "/retry")
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + ItsmMachineJwtTestConfiguration.machineToken(jwtEncoder));
+	}
+
+	private String fixture(String path) throws java.io.IOException {
+		try (var input = getClass().getResourceAsStream(path)) {
+			assertThat(input).isNotNull();
+			return new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+		}
+	}
+
 	private void acceptSnapshot(UUID id, long version, String body) throws Exception {
 		mockMvc.perform(postBatch(id, SOURCE, version).content(body)).andExpect(status().isAccepted())
 				.andExpect(header().string(HttpHeaders.LOCATION, BATCH_PATH + "/" + id))
@@ -349,6 +567,11 @@ class ItsmSnapshotPublicationIT extends ItsmWorkerTestSupport {
 				 "productName":"Test product","assignedGroupName":"Test team","assignedEmployee":%s,
 				 "assignedEmployeeLogin":%s,"solution":null}
 				""".formatted(suffix, employee, employee);
+	}
+
+	private static String withDecimal(String decimal) {
+		String incident = inc("A", "\"initial\"").strip();
+		return incident.substring(0, incident.length() - 1) + ",\"metric\":" + decimal + "}";
 	}
 
 	@TestConfiguration(proxyBeanMethods = false)

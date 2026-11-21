@@ -198,7 +198,7 @@ paths:
                   summary: Content-Type не application/json
                   value: {"code": "UNSUPPORTED_MEDIA_TYPE", "message": "Content type is not supported"}
         '429':
-          description: 'Приёмник временно ограничил поток: очередь необработанных пакетов заполнена.'
+          description: Очередь заполнена или источник публикует первый снимок. Повторите запрос с теми же заголовками и телом.
           headers:
             Retry-After:
               required: false
@@ -300,6 +300,38 @@ paths:
         source: ITCS
         delivery: server-to-server
         webhook: '/api/integrations/itsm/batches/{batchId}'
+  '/api/integrations/itsm/batches/{batchId}/retry':
+    post:
+      operationId: retryItsmTechnicalFailure
+      summary: Повторить пакет после исчерпания технических попыток
+      security:
+        - machineBearer: []
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '202':
+          description: Исходный пакет повторно поставлен в очередь с прежним ID, версией и телом.
+          headers:
+            Location:
+              required: true
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItsmBatchAccepted'
+        '401':
+          description: Нет действительного машинного токена.
+        '403':
+          description: Нет права импорта.
+        '404':
+          description: Пакет не найден.
+        '409':
+          description: Пакет не является техническим отказом без назначенного повтора. Семантический отказ повторить нельзя.
+        '429':
+          description: Очередь заполнена.
   /api/snapshot/status:
     get:
       operationId: getSnapshotStatus
@@ -310,6 +342,7 @@ paths:
         `revision` — ревизия изменения, а не версия полученного снимка или `eventSeq`.
       security:
         - form-or-basic: []
+        - humanBearer: []
         - machineBearerProspective: []
       responses:
         '200':
@@ -565,7 +598,7 @@ webhooks:
                   summary: Content-Type не application/json
                   value: {"code": "UNSUPPORTED_MEDIA_TYPE", "message": "Content type is not supported"}
         '429':
-          description: 'Приёмник временно ограничил поток: очередь необработанных пакетов заполнена.'
+          description: Очередь заполнена или источник публикует первый снимок. Повторите запрос с теми же заголовками и телом.
           headers:
             Retry-After:
               required: false
@@ -620,6 +653,10 @@ webhooks:
                   summary: Опубликованный пакет (fixture ingest-batch-succeeded-200)
                   x-fixture: ingest-batch-succeeded-200
                   value: {"batchId": "3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11", "sourceId": "itcs-prod", "sourceVersion": 42, "receivedAt": "2026-11-21T09:05:00.123456Z", "status": "SUCCEEDED", "diagnostic": "applied snapshot revision 42", "nextAttemptAt": null}
+                invalidRecord:
+                  summary: Терминальная ошибка валидации после приёма пакета
+                  x-fixture: ingest-batch-invalid-200
+                  value: {"batchId": "3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11", "sourceId": "itcs-prod", "sourceVersion": 42, "receivedAt": "2026-11-21T09:05:00.123456Z", "status": "FAILED", "diagnostic": "ITSM_INVALID_RECORD: ITSM record in snapshot at index 0 has invalid field id: must be a string", "nextAttemptAt": null, "waitingForVersion": null}
         '401':
           description: Нет или невалиден машинный Bearer.
           headers:
@@ -751,6 +788,8 @@ components:
         - stateEnum
         - priorityId
         - submitDate
+        - productName
+        - solution
       properties:
         id:
           $ref: '#/components/schemas/IncidentId'
@@ -808,9 +847,10 @@ components:
             - string
             - 'null'
         productName:
-          type:
-            - string
-            - 'null'
+          type: string
+          minLength: 1
+          maxLength: 300
+          description: Непустое имя продукта для каталога.
         serviceType:
           type:
             - string

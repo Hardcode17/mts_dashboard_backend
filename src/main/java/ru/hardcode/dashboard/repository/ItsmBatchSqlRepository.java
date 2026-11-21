@@ -24,6 +24,7 @@ public class ItsmBatchSqlRepository {
 	 * Stable application-wide advisory lock key for the single ITSM intake stream.
 	 */
 	private static final long INTAKE_LOCK_KEY = 4_723_199_901_277L;
+	private static final String BASELINE_LOCK_KEY = "hashtextextended(?, 65031)";
 
 	private final JdbcTemplate jdbcTemplate;
 
@@ -37,6 +38,25 @@ public class ItsmBatchSqlRepository {
 				(rs, rowNum) -> Boolean.TRUE,
 				INTAKE_LOCK_KEY
 		);
+	}
+
+	/** Intake never waits behind a cold source's first publication. */
+	public boolean isSourcePublishingBaseline(String sourceId) {
+		return Boolean.TRUE.equals(jdbcTemplate.queryForObject(
+				"SELECT NOT pg_try_advisory_xact_lock(" + BASELINE_LOCK_KEY + ")", Boolean.class, sourceId));
+	}
+
+	public void lockSourceForBaseline(String sourceId) {
+		jdbcTemplate.queryForObject("SELECT pg_advisory_xact_lock(" + BASELINE_LOCK_KEY + ")",
+				(rs, rowNum) -> Boolean.TRUE, sourceId);
+	}
+
+	public boolean requeueTechnicalFailure(UUID batchId) {
+		return jdbcTemplate.update("""
+				UPDATE itsm_ingest_batch SET status = 'RECEIVED', status_updated_at = now(),
+				    batch_attempts = 0, diagnostic = NULL
+				WHERE id = ? AND status = 'FAILED' AND next_attempt_at IS NULL AND NOT validation_rejected
+				""", batchId) == 1;
 	}
 
 	public long countOutstanding() {
