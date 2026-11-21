@@ -33,7 +33,6 @@ dependencies {
 	implementation("org.springframework.ai:spring-ai-starter-model-chat-memory-repository-jdbc")
 	implementation("org.springframework.ai:spring-ai-starter-model-deepseek")
 	implementation("org.springframework.ai:spring-ai-starter-tool-search-advisor")
-	implementation("org.springframework.ai:spring-ai-starter-vector-store-elasticsearch")
 	implementation("org.springframework.ai:spring-ai-starter-vector-store-pgvector")
 	implementation("org.springframework.ai:spring-ai-vector-store-advisor")
 	compileOnly("org.projectlombok:lombok")
@@ -46,7 +45,6 @@ dependencies {
 	testImplementation("org.springframework.boot:spring-boot-starter-websocket-test")
 	testImplementation("org.springframework.boot:spring-boot-testcontainers")
 	testImplementation("org.springframework.ai:spring-ai-spring-boot-testcontainers")
-	testImplementation("org.testcontainers:testcontainers-elasticsearch")
 	testImplementation("org.testcontainers:testcontainers-junit-jupiter")
 	// Keycloak is not part of the Testcontainers BOM; community module with its own coordinates
 	// (package dasniko.testcontainers.keycloak) built for Testcontainers 2.x.
