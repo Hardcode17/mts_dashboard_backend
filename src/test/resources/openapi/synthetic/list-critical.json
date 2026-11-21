@@ -1,0 +1,127 @@
+{
+  "eventSeq": 43,
+  "revision": 42,
+  "beforeFirstSuccess": false,
+  "groups": [
+    {
+      "key": "critical",
+      "title": "Критические",
+      "rule": "Активный инцидент с priorityId = 4",
+      "active": true,
+      "incidentCount": 2,
+      "incidents": [
+        {
+          "id": "INC000021095531",
+          "productName": "Оплата заказов",
+          "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов",
+          "stateEnum": "Assigned",
+          "priorityId": 4,
+          "submitDate": "2026-11-21T09:00:00Z",
+          "deadline": "2026-11-21T12:00:00Z",
+          "completionDate": null,
+          "groupMemberships": [
+            {
+              "group": "coordinator",
+              "matchedRule": "assignedToCoordinators"
+            },
+            {
+              "group": "critical",
+              "matchedRule": "priorityId = 4"
+            }
+          ]
+        },
+        {
+          "id": "INC000021095532",
+          "productName": "Оплата заказов",
+          "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов",
+          "stateEnum": "WorkInProgress",
+          "priorityId": 4,
+          "submitDate": "2026-11-21T09:01:00Z",
+          "deadline": null,
+          "completionDate": null,
+          "groupMemberships": [
+            {
+              "group": "coordinator",
+              "matchedRule": "assignedToCoordinators"
+            },
+            {
+              "group": "critical",
+              "matchedRule": "priorityId = 4"
+            }
+          ]
+        }
+      ],
+      "fixed": null
+    },
+    {
+      "key": "high",
+      "title": "Высокий приоритет",
+      "rule": "Активный инцидент с priorityId = 3",
+      "active": true,
+      "incidentCount": 0,
+      "incidents": [],
+      "fixed": null
+    },
+    {
+      "key": "coordinator",
+      "title": "На координаторах",
+      "rule": "Активный инцидент или Research, назначенный на координаторов",
+      "active": true,
+      "incidentCount": 0,
+      "incidents": [],
+      "fixed": null
+    },
+    {
+      "key": "research",
+      "title": "Исследование ситуации",
+      "rule": "stateEnum = Research; карточка видна и с датой устранения",
+      "active": false,
+      "incidentCount": 0,
+      "incidents": [],
+      "fixed": null
+    }
+  ],
+  "items": [
+    {
+      "id": "INC000021095531",
+      "productName": "Оплата заказов",
+      "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов",
+      "stateEnum": "Assigned",
+      "priorityId": 4,
+      "submitDate": "2026-11-21T09:00:00Z",
+      "deadline": "2026-11-21T12:00:00Z",
+      "completionDate": null,
+      "groupMemberships": [
+        {
+          "group": "coordinator",
+          "matchedRule": "assignedToCoordinators"
+        },
+        {
+          "group": "critical",
+          "matchedRule": "priorityId = 4"
+        }
+      ]
+    },
+    {
+      "id": "INC000021095532",
+      "productName": "Оплата заказов",
+      "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов",
+      "stateEnum": "WorkInProgress",
+      "priorityId": 4,
+      "submitDate": "2026-11-21T09:01:00Z",
+      "deadline": null,
+      "completionDate": null,
+      "groupMemberships": [
+        {
+          "group": "coordinator",
+          "matchedRule": "assignedToCoordinators"
+        },
+        {
+          "group": "critical",
+          "matchedRule": "priorityId = 4"
+        }
+      ]
+    }
+  ],
+  "nextCursor": null
+}

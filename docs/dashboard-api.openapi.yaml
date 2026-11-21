@@ -1,0 +1,1401 @@
+openapi: 3.1.0
+info:
+  title: Dashboard — чтения координатора (KAN-7)
+  version: 1.0.0
+  description: |
+    Канонический контракт чтений дашборда для KAN-7: список и группы инцидентов,
+    карточка, статус источника, polling по `eventSeq` и подтверждение точного набора `eventId`.
+    Согласован в KAN-20 с приёмом снимков (`itsm-ingest.openapi.yaml`, KAN-27/KAN-53).
+    Контроллеров этих чтений пока нет: публикуются **примеры**, а не работающие маршруты.
+    Примеры синтетические (INC `INC0000210955xx` не пересекаются с реальной выгрузкой),
+    валидируются схемами и пригодны фронту до готовности БД.
+
+    ## Один канонический маршрут для каждого чтения
+
+    | Чтение | Маршрут | Следствие |
+    | --- | --- | --- |
+    | Список | `GET /api/dashboard/incidents` | группы через `group`; отдельного маршрута групп нет |
+    | Карточка | `GET /api/dashboard/incidents/{incidentId}` | `incidentId` — строковый INC, URL-кодируется |
+    | Статус источника | `GET /api/dashboard/sources` | все источники, включая stale |
+    | Polling | `GET /api/dashboard/events?sinceEventSeq=` | события с `eventSeq > sinceEventSeq` |
+    | Подтверждение | `POST /api/dashboard/events/ack` | точный набор `eventId`, без `since` и «до» |
+
+    Статус снимка приёма (`GET /api/snapshot/status`, KAN-27) — отдельное операционное
+    чтение; здесь не дублируется.
+
+    ## Общие правила
+
+    - **`id` — строка**: `INC000021095531`. Число в `id` — ошибка модели.
+    - **Даты — UTC**, ISO-8601 с `Z`, до микросекунд. Исходные `YYYY-MM-DD HH:MM:SS` без зоны
+      ITCS считает UTC (как парсер KAN-21).
+    - **Nullable-поля** объявлены явно: `deadline` (карточка без срока), `completionDate` и
+      `solution` (только у завершённых), `stateReason`, `lastAssignmentToTeamDateTime`,
+      `group.fixed`, а также `revision` у источника до первой публикации.
+    - **`revision`** — опубликованная версия источника, то же значение, что в
+      `GET /api/snapshot/status`. «Снимок revision 42» означает, что блок ответа построен ровно
+      из этой публикации.
+    - **`eventSeq`** — счётчик изменений опубликованных данных, версия блока статуса. Его
+      возвращают все чтения, в том числе `404`.
+    - **`sourceVersion`** вида `X-Source-Version` — версия доставки отправителя. Не `revision`
+      и не `eventSeq`: `202` не публикует данные, а несколько версий между опросами
+      сворачиваются в одно изменение `eventSeq`.
+
+    ## polling и ack
+
+    `events` возвращает изменения с `eventSeq > sinceEventSeq` в порядке возрастания.
+    `nextEventSeq` события: `upserted` — `revision`, после которой появилось изменение;
+    `removed` — `eventSeq`, после которого INC исчез из полного снимка. `heartbeat`
+    (пустой `changes`, `nextEventSeq` текущий) приходит раз в 30 с, чтобы соединение было
+    видно как живое.
+
+    Новая публикация revision N+1 увеличивает `eventSeq`, даже если набор INC не изменился:
+    `eventSeq` версионирует блок статуса, а не содержимое снимка. Два изменения одного INC
+    (например, обновление и удаление) — два разных `eventId` с разными `eventSeq`.
+
+    `POST /events/ack` принимает **точный** список `eventId`, полученный в `events`.
+    Подтверждённый `eventSeq` — наибольший `eventSeq`, при котором все события до него входят
+    в подтверждённый набор; `confirmedEventIds` эхом повторяет принятый набор. Повторный `ack`
+    с тем же набором — `200` без побочных эффектов. Неизвестный, чужой или уже вытесненный из
+    журнала `eventId` — `400 ACK_EVENT_UNKNOWN`, ничего не подтверждается. «Подтвердить всё до
+    N» не предусмотрено: клиент подтверждает только увиденное.
+
+    ## Источник и свежесть
+
+    `GET /api/dashboard/sources` описывает подключённый ITCS: `revision` опубликованной версии,
+    `sourceVersion` последней доставки, `lastReceivedAt`/`lastSuccessAt`, `staleAfterSeconds`
+    (по умолчанию 90 — три полных снимка по 30 с) и `stale`. Пока воркер не опубликовал снимок,
+    `stale` остаётся `true`.
+
+    ## Чтения и авторизация
+
+    Оператор (интерфейс координатора) — сессия `cookieAuth`; машинный мониторинг источников —
+    `machineBearer` (предлагается). В KAN-27 машинная цепочка с правом импорта действует
+    только на `/api/integrations/itsm/**`.
+
+    ## Ошибки
+
+    JSON-ошибки — `ErrorResponse` (`code`, `message`), как во всём приложении. Развёрнутая
+    цепочка UI для неаутентифицированного браузера отвечает редиректом формы (`302`); API-клиент
+    с `Accept: application/json` получает `401 AUTH_REQUIRED`. Машинный Bearer без прав —
+    `401 MACHINE_AUTH_REQUIRED` с `WWW-Authenticate: Bearer`.
+
+security:
+  - cookieAuth: []
+  - machineBearer: []
+paths:
+  /api/dashboard/incidents:
+    get:
+      operationId: listIncidents
+      summary: Список инцидентов и групп (KAN-7)
+      description: |
+        Единственный маршрут списка. `group` повторяется; без него — активные
+        инциденты с группами. `includeCompleted=false` скрывает завершённые (`Resolved`, `Closed`,
+        `Research`) строки, но группа «Исследование ситуации» остаётся. P4, назначенный
+        координаторам, входит одновременно в `critical` и `coordinator`: объект в `items` один,
+        `groupMemberships` перечисляет все группы.
+      parameters:
+        - name: group
+          in: query
+          description: 'Группа дашборда; повторяется для выбора нескольких. Неизвестная группа — `400 INVALID_GROUP`.'
+          style: form
+          explode: true
+          schema:
+            type: array
+            items:
+              $ref: '#/components/schemas/IncidentGroupKey'
+        - name: includeCompleted
+          in: query
+          schema:
+            type: boolean
+            default: false
+        - name: cursor
+          in: query
+          required: false
+          description: 'Непрозрачный курсор из предыдущего `nextCursor`; без курсора — первая страница.'
+          schema:
+            type: string
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 50
+        - name: Accept
+          in: header
+          required: false
+          description: |
+            `application/json` (по умолчанию). `text/csv` — плоская выгрузка: INC по
+            строке без курсора и среза.
+          schema:
+            type: string
+            enum:
+              - application/json
+              - text/csv
+      responses:
+        '200':
+          description: Страница инцидентов с группами.
+          headers:
+            ETag:
+              description: '`eventSeq` страницы; `If-None-Match` с ним даёт `304` без тела.'
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentList'
+              examples:
+                defaultList:
+                  summary: 'Критические и группы. P4 в двух группах, INC без срока, research и завершённый INC (fixture list-default)'
+                  x-fixture: list-default
+                  value:
+                    eventSeq: 43
+                    revision: 42
+                    beforeFirstSuccess: false
+                    groups:
+                      - key: critical
+                        title: Критические
+                        rule: Активный инцидент с priorityId = 4
+                        active: true
+                        incidentCount: 2
+                        incidents:
+                          - id: INC000021095531
+                            productName: Оплата заказов
+                            assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                            stateEnum: Assigned
+                            priorityId: 4
+                            submitDate: '2026-11-21T09:00:00Z'
+                            deadline: '2026-11-21T12:00:00Z'
+                            completionDate: null
+                            groupMemberships:
+                              - group: coordinator
+                                matchedRule: assignedToCoordinators
+                              - group: critical
+                                matchedRule: priorityId = 4
+                          - id: INC000021095532
+                            productName: Оплата заказов
+                            assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                            stateEnum: WorkInProgress
+                            priorityId: 4
+                            submitDate: '2026-11-21T09:01:00Z'
+                            deadline: null
+                            completionDate: null
+                            groupMemberships:
+                              - group: coordinator
+                                matchedRule: assignedToCoordinators
+                              - group: critical
+                                matchedRule: priorityId = 4
+                        fixed: null
+                      - key: high
+                        title: Высокий приоритет
+                        rule: Активный инцидент с priorityId = 3
+                        active: true
+                        incidentCount: 1
+                        incidents:
+                          - id: INC000021095538
+                            productName: Оплата заказов
+                            assignedGroupName: Оплата
+                            stateEnum: WorkInProgress
+                            priorityId: 3
+                            submitDate: '2026-11-21T09:03:00Z'
+                            deadline: '2026-11-24T18:00:00Z'
+                            completionDate: null
+                            groupMemberships:
+                              - group: high
+                                matchedRule: priorityId = 3
+                        fixed: null
+                      - key: coordinator
+                        title: На координаторах
+                        rule: 'Активный инцидент или Research, назначенный на координаторов'
+                        active: true
+                        incidentCount: 3
+                        incidents:
+                          - id: INC000021095531
+                            productName: Оплата заказов
+                            assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                            stateEnum: Assigned
+                            priorityId: 4
+                            submitDate: '2026-11-21T09:00:00Z'
+                            deadline: '2026-11-21T12:00:00Z'
+                            completionDate: null
+                            groupMemberships:
+                              - group: coordinator
+                                matchedRule: assignedToCoordinators
+                              - group: critical
+                                matchedRule: priorityId = 4
+                          - id: INC000021095532
+                            productName: Оплата заказов
+                            assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                            stateEnum: WorkInProgress
+                            priorityId: 4
+                            submitDate: '2026-11-21T09:01:00Z'
+                            deadline: null
+                            completionDate: null
+                            groupMemberships:
+                              - group: coordinator
+                                matchedRule: assignedToCoordinators
+                              - group: critical
+                                matchedRule: priorityId = 4
+                          - id: INC000021095539
+                            productName: Оплата заказов
+                            assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                            stateEnum: Research
+                            priorityId: 3
+                            submitDate: '2026-11-20T15:00:00Z'
+                            deadline: '2026-11-20T20:00:00Z'
+                            completionDate: '2026-11-20T19:40:00Z'
+                            groupMemberships:
+                              - group: coordinator
+                                matchedRule: assignedToCoordinators
+                              - group: research
+                                matchedRule: stateEnum = Research
+                        fixed: null
+                      - key: research
+                        title: Исследование ситуации
+                        rule: stateEnum = Research; карточка видна и с датой устранения
+                        active: false
+                        incidentCount: 1
+                        incidents:
+                          - id: INC000021095539
+                            productName: Оплата заказов
+                            assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                            stateEnum: Research
+                            priorityId: 3
+                            submitDate: '2026-11-20T15:00:00Z'
+                            deadline: '2026-11-20T20:00:00Z'
+                            completionDate: '2026-11-20T19:40:00Z'
+                            groupMemberships:
+                              - group: coordinator
+                                matchedRule: assignedToCoordinators
+                              - group: research
+                                matchedRule: stateEnum = Research
+                        fixed: null
+                    items:
+                      - id: INC000021095531
+                        productName: Оплата заказов
+                        assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                        stateEnum: Assigned
+                        priorityId: 4
+                        submitDate: '2026-11-21T09:00:00Z'
+                        deadline: '2026-11-21T12:00:00Z'
+                        completionDate: null
+                        groupMemberships:
+                          - group: coordinator
+                            matchedRule: assignedToCoordinators
+                          - group: critical
+                            matchedRule: priorityId = 4
+                      - id: INC000021095532
+                        productName: Оплата заказов
+                        assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                        stateEnum: WorkInProgress
+                        priorityId: 4
+                        submitDate: '2026-11-21T09:01:00Z'
+                        deadline: null
+                        completionDate: null
+                        groupMemberships:
+                          - group: coordinator
+                            matchedRule: assignedToCoordinators
+                          - group: critical
+                            matchedRule: priorityId = 4
+                      - id: INC000021095538
+                        productName: Оплата заказов
+                        assignedGroupName: Оплата
+                        stateEnum: WorkInProgress
+                        priorityId: 3
+                        submitDate: '2026-11-21T09:03:00Z'
+                        deadline: '2026-11-24T18:00:00Z'
+                        completionDate: null
+                        groupMemberships:
+                          - group: high
+                            matchedRule: priorityId = 3
+                      - id: INC000021095539
+                        productName: Оплата заказов
+                        assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                        stateEnum: Research
+                        priorityId: 3
+                        submitDate: '2026-11-20T15:00:00Z'
+                        deadline: '2026-11-20T20:00:00Z'
+                        completionDate: '2026-11-20T19:40:00Z'
+                        groupMemberships:
+                          - group: coordinator
+                            matchedRule: assignedToCoordinators
+                          - group: research
+                            matchedRule: stateEnum = Research
+                    nextCursor: null
+                criticalOnly:
+                  summary: 'Только группа critical. P4, в том числе без срока (fixture list-critical)'
+                  x-fixture: list-critical
+                  value:
+                    eventSeq: 43
+                    revision: 42
+                    beforeFirstSuccess: false
+                    groups:
+                      - key: critical
+                        title: Критические
+                        rule: Активный инцидент с priorityId = 4
+                        active: true
+                        incidentCount: 2
+                        incidents:
+                          - id: INC000021095531
+                            productName: Оплата заказов
+                            assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                            stateEnum: Assigned
+                            priorityId: 4
+                            submitDate: '2026-11-21T09:00:00Z'
+                            deadline: '2026-11-21T12:00:00Z'
+                            completionDate: null
+                            groupMemberships:
+                              - group: coordinator
+                                matchedRule: assignedToCoordinators
+                              - group: critical
+                                matchedRule: priorityId = 4
+                          - id: INC000021095532
+                            productName: Оплата заказов
+                            assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                            stateEnum: WorkInProgress
+                            priorityId: 4
+                            submitDate: '2026-11-21T09:01:00Z'
+                            deadline: null
+                            completionDate: null
+                            groupMemberships:
+                              - group: coordinator
+                                matchedRule: assignedToCoordinators
+                              - group: critical
+                                matchedRule: priorityId = 4
+                        fixed: null
+                      - key: high
+                        title: Высокий приоритет
+                        rule: Активный инцидент с priorityId = 3
+                        active: true
+                        incidentCount: 0
+                        incidents: []
+                        fixed: null
+                      - key: coordinator
+                        title: На координаторах
+                        rule: 'Активный инцидент или Research, назначенный на координаторов'
+                        active: true
+                        incidentCount: 0
+                        incidents: []
+                        fixed: null
+                      - key: research
+                        title: Исследование ситуации
+                        rule: stateEnum = Research; карточка видна и с датой устранения
+                        active: false
+                        incidentCount: 0
+                        incidents: []
+                        fixed: null
+                    items:
+                      - id: INC000021095531
+                        productName: Оплата заказов
+                        assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                        stateEnum: Assigned
+                        priorityId: 4
+                        submitDate: '2026-11-21T09:00:00Z'
+                        deadline: '2026-11-21T12:00:00Z'
+                        completionDate: null
+                        groupMemberships:
+                          - group: coordinator
+                            matchedRule: assignedToCoordinators
+                          - group: critical
+                            matchedRule: priorityId = 4
+                      - id: INC000021095532
+                        productName: Оплата заказов
+                        assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                        stateEnum: WorkInProgress
+                        priorityId: 4
+                        submitDate: '2026-11-21T09:01:00Z'
+                        deadline: null
+                        completionDate: null
+                        groupMemberships:
+                          - group: coordinator
+                            matchedRule: assignedToCoordinators
+                          - group: critical
+                            matchedRule: priorityId = 4
+                    nextCursor: null
+                emptyGroup:
+                  summary: Выбранная группа пуста (fixture list-empty-group)
+                  x-fixture: list-empty-group
+                  value:
+                    eventSeq: 43
+                    revision: 42
+                    beforeFirstSuccess: false
+                    groups:
+                      - key: critical
+                        title: Критические
+                        rule: Активный инцидент с priorityId = 4
+                        active: true
+                        incidentCount: 0
+                        incidents: []
+                        fixed: null
+                      - key: high
+                        title: Высокий приоритет
+                        rule: Активный инцидент с priorityId = 3
+                        active: true
+                        incidentCount: 0
+                        incidents: []
+                        fixed: null
+                      - key: coordinator
+                        title: На координаторах
+                        rule: 'Активный инцидент или Research, назначенный на координаторов'
+                        active: true
+                        incidentCount: 0
+                        incidents: []
+                        fixed: null
+                      - key: research
+                        title: Исследование ситуации
+                        rule: stateEnum = Research; карточка видна и с датой устранения
+                        active: false
+                        incidentCount: 0
+                        incidents: []
+                        fixed: null
+                    items: []
+                    nextCursor: null
+                nextPage:
+                  summary: Следующая страница с непрозрачным курсором
+                  value:
+                    eventSeq: 43
+                    revision: 42
+                    beforeFirstSuccess: false
+                    groups: []
+                    items:
+                      - id: INC000021095540
+                        productName: Онлайн-магазин
+                        assignedGroupName: Онлайн-магазин
+                        stateEnum: Assigned
+                        priorityId: 4
+                        submitDate: '2026-11-21T09:04:00Z'
+                        deadline: null
+                        completionDate: null
+                        groupMemberships:
+                          - group: critical
+                            matchedRule: priorityId = 4
+                    nextCursor: null
+                beforeFirstSuccess:
+                  summary: 'Чтение до первой публикации. Пустой список, группы пусты (fixture list-before-first-success)'
+                  x-fixture: list-before-first-success
+                  value:
+                    eventSeq: 0
+                    revision: 0
+                    beforeFirstSuccess: true
+                    groups: []
+                    items: []
+                    nextCursor: null
+            text/csv:
+              schema:
+                type: string
+                contentMediaType: text/csv
+              examples:
+                csv:
+                  summary: 'Строковый идентификатор, пустой срок для INC без срока'
+                  value: |
+                    incidentId,priorityId,stateEnum,deadline,groups
+                    INC000021095531,4,Assigned,2026-11-21T12:00:00Z,critical;coordinator
+                    INC000021095532,4,WorkInProgress,,critical;coordinator
+                    INC000021095538,3,WorkInProgress,2026-11-24T18:00:00Z,high
+        '304':
+          description: 'Не изменилось с указанного `If-None-Match`.'
+          headers:
+            ETag:
+              schema:
+                type: string
+        '400':
+          description: Некорректный запрос.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidGroup:
+                  summary: Неизвестная группа
+                  value: {"code": "INVALID_GROUP", "message": "Unknown dashboard group ${group}"}
+                invalidCursor:
+                  summary: Непрозрачный курсор повреждён
+                  value: {"code": "INVALID_CURSOR", "message": "cursor is not a valid list cursor"}
+        '401':
+          description: Нет допустимой сессии или токена.
+          headers:
+            WWW-Authenticate:
+              required: false
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                cookieAuthRequired:
+                  summary: Нет сессии интерфейса
+                  value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
+                machineAuthRequired:
+                  summary: Нет или невалиден машинный Bearer
+                  value: {"code": "MACHINE_AUTH_REQUIRED", "message": "Machine bearer token is required"}
+        '403':
+          description: Токен или сессия без нужного права.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                machineAccessDenied:
+                  summary: Машинный клиент без права чтения
+                  value: {"code": "MACHINE_ACCESS_DENIED", "message": "Machine client is not allowed to read the dashboard"}
+  '/api/dashboard/incidents/{incidentId}':
+    get:
+      operationId: getIncidentCard
+      summary: Карточка инцидента (KAN-7)
+      description: |
+        Полная карточка. `deadline` — `null`, если срока нет (нет поля, `null` или
+        техническое `0001-01-01T00:00:00Z` в снимке). `completionDate` и `solution` — `null` у
+        активных и заполнены у завершённых. Ответ всегда несёт `eventSeq` и `revision` публикации,
+        из которой он построен.
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          description: 'Строковый INC, URL-кодируется; числовой вид не принимается.'
+          schema:
+            $ref: '#/components/schemas/IncidentId'
+          examples:
+            withoutDeadline:
+              value: "INC000021095532"
+            research:
+              value: "INC000021095539"
+      responses:
+        '200':
+          description: Карточка.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentCard'
+              examples:
+                withoutDeadline:
+                  summary: 'Активный P4 без срока, в двух группах (fixture card-without-deadline)'
+                  x-fixture: card-without-deadline
+                  value:
+                    id: INC000021095532
+                    header: Часть заказов не оплачивается через СБП
+                    description: Синтетическое описание для контрактных примеров KAN-20.
+                    productName: Оплата заказов
+                    productMasterId: BI_pay
+                    service: checkout-api
+                    serviceType: Клиентский
+                    assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                    stateEnum: WorkInProgress
+                    stateReason: null
+                    priorityId: 4
+                    submitDate: '2026-11-21T09:01:00Z'
+                    lastAssignmentToTeamDateTime: '2026-11-21T09:01:00Z'
+                    deadline: null
+                    completionDate: null
+                    solution: null
+                    groupMemberships:
+                      - group: coordinator
+                        matchedRule: assignedToCoordinators
+                      - group: critical
+                        matchedRule: priorityId = 4
+                    eventSeq: 43
+                    revision: 42
+                research:
+                  summary: Research с заполненным сроком и датой устранения (fixture card-research)
+                  x-fixture: card-research
+                  value:
+                    id: INC000021095539
+                    header: Ошибки авторизации в приложении
+                    description: Синтетическое описание для контрактных примеров KAN-20.
+                    productName: Оплата заказов
+                    productMasterId: BI_pay
+                    service: checkout-api
+                    serviceType: Клиентский
+                    assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                    stateEnum: Research
+                    stateReason: решено
+                    priorityId: 3
+                    submitDate: '2026-11-20T15:00:00Z'
+                    lastAssignmentToTeamDateTime: '2026-11-20T15:00:00Z'
+                    deadline: '2026-11-20T20:00:00Z'
+                    completionDate: '2026-11-20T19:40:00Z'
+                    solution: Перезапущен пул соединений БД
+                    groupMemberships:
+                      - group: coordinator
+                        matchedRule: assignedToCoordinators
+                      - group: research
+                        matchedRule: stateEnum = Research
+                    eventSeq: 43
+                    revision: 42
+                completed:
+                  summary: Завершённый INC с решением (fixture card-completed)
+                  x-fixture: card-completed
+                  value:
+                    id: INC000021095537
+                    header: Виджет корзины показывал ошибку
+                    description: Синтетическое описание для контрактных примеров KAN-20.
+                    productName: Оплата заказов
+                    productMasterId: BI_pay
+                    service: checkout-api
+                    serviceType: Клиентский
+                    assignedGroupName: Онлайн-магазин
+                    stateEnum: Closed
+                    stateReason: решено
+                    priorityId: 2
+                    submitDate: '2026-11-19T10:00:00Z'
+                    lastAssignmentToTeamDateTime: '2026-11-19T10:00:00Z'
+                    deadline: '2026-11-19T18:00:00Z'
+                    completionDate: '2026-11-19T16:30:00Z'
+                    solution: Откатан релиз виджета
+                    groupMemberships:
+                      - group: critical
+                        matchedRule: priorityId = 4
+                    eventSeq: 43
+                    revision: 42
+        '400':
+          description: Идентификатор не в формате INC.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidIncidentId:
+                  summary: Идентификатор не в формате INC
+                  value: {"code": "INVALID_INCIDENT_ID", "message": "incidentId must be an INC identifier such as INC000021095531"}
+        '401':
+          description: Нет допустимой сессии или токена.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                cookieAuthRequired:
+                  summary: Нет сессии интерфейса
+                  value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
+        '404':
+          description: Карточка не найдена в опубликованной версии.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentNotFound'
+              examples:
+                notFound:
+                  summary: INC отсутствует в опубликованной версии (fixture card-not-found)
+                  x-fixture: card-not-found
+                  value:
+                    code: INCIDENT_NOT_FOUND
+                    message: Incident INC000021095599 not found
+                    eventSeq: 43
+                    revision: 42
+                beforeFirstSuccess:
+                  summary: Публикации ещё нет (fixture card-before-first-success)
+                  x-fixture: card-before-first-success
+                  value:
+                    code: INCIDENT_NOT_FOUND
+                    message: Incident not found
+                    eventSeq: 0
+                    revision: 0
+  /api/dashboard/sources:
+    get:
+      operationId: listSources
+      summary: Статус источников и свежесть публикации (KAN-7)
+      description: |
+        Все источники, включая stale. `revision` — опубликованная версия,
+        `sourceVersion` — последняя доставка (не путать ни с `revision`, ни с `eventSeq`). `stale` —
+        `true`, пока последняя доставка не опубликована, или последний приём старше
+        `staleAfterSeconds` (при снимке каждые 30 с — пропуск до трёх тиков).
+      responses:
+        '200':
+          description: Источники.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SourceList'
+              examples:
+                published:
+                  summary: Свежий опубликованный снимок (fixture sources-published)
+                  x-fixture: sources-published
+                  value:
+                    eventSeq: 43
+                    revision: 42
+                    sources:
+                      - sourceId: itcs-prod
+                        kind: ITCS
+                        revision: 42
+                        sourceVersion: 42
+                        lastReceivedAt: '2026-11-21T09:05:00.123456Z'
+                        lastSuccessAt: '2026-11-21T09:05:01.000000Z'
+                        batchStatus: SUCCEEDED
+                        stale: false
+                        staleAfterSeconds: 90
+                stale:
+                  summary: 'Снимок принят, успеха воркера нет — stale (fixture sources-stale)'
+                  x-fixture: sources-stale
+                  value:
+                    eventSeq: 43
+                    revision: 42
+                    sources:
+                      - sourceId: itcs-prod
+                        kind: ITCS
+                        revision: 42
+                        sourceVersion: 43
+                        lastReceivedAt: '2026-11-21T09:08:35.250000Z'
+                        lastSuccessAt: '2026-11-21T09:05:01.000000Z'
+                        batchStatus: RECEIVED
+                        stale: true
+                        staleAfterSeconds: 90
+        '401':
+          description: Нет допустимой сессии или токена.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                machineAuthRequired:
+                  summary: Нет или невалиден машинный Bearer
+                  value: {"code": "MACHINE_AUTH_REQUIRED", "message": "Machine bearer token is required"}
+  /api/dashboard/events:
+    get:
+      operationId: pollEvents
+      summary: Polling изменений по eventSeq (KAN-7)
+      description: |
+        События с `eventSeq > sinceEventSeq`, по возрастанию. Два события одного INC
+        (обновление и удаление) приходят разными `eventId` и `eventSeq`.
+      parameters:
+        - name: sinceEventSeq
+          in: query
+          required: true
+          description: 'Последний обработанный `eventSeq`; `0` — с начала.'
+          schema:
+            $ref: '#/components/schemas/EventSeq'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 500
+            default: 100
+      responses:
+        '200':
+          description: Изменения.
+          headers:
+            ETag:
+              description: '`eventSeq` выборки; `If-None-Match` с ним даёт `304`, когда новых событий нет.'
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventBatch'
+              examples:
+                twoEventsSameIncident:
+                  summary: Обновление и удаление одного INC — два eventId (fixture events-poll-two-events)
+                  x-fixture: events-poll-two-events
+                  value:
+                    eventSeq: 43
+                    nextEventSeq: 43
+                    stale: false
+                    source:
+                      sourceId: itcs-prod
+                      kind: ITCS
+                      revision: 42
+                      sourceVersion: 42
+                      lastReceivedAt: '2026-11-21T09:05:00.123456Z'
+                      lastSuccessAt: '2026-11-21T09:05:01.000000Z'
+                      batchStatus: SUCCEEDED
+                      stale: false
+                      staleAfterSeconds: 90
+                    events:
+                      - eventId: evt-0002
+                        type: upserted
+                        eventSeq: 43
+                        occurredAt: '2026-11-21T09:05:00.500000Z'
+                        incident:
+                          id: INC000021095533
+                          groupMemberships:
+                            - group: high
+                              matchedRule: priorityId = 3
+                      - eventId: evt-0003
+                        type: removed
+                        eventSeq: 43
+                        occurredAt: '2026-11-21T09:05:00.500000Z'
+                        incident:
+                          id: INC000021095533
+                          groupMemberships:
+                            - group: high
+                              matchedRule: priorityId = 3
+                heartbeat:
+                  summary: 'Изменений нет, событие-сердцебиение (fixture events-heartbeat)'
+                  x-fixture: events-heartbeat
+                  value:
+                    eventSeq: 43
+                    nextEventSeq: 43
+                    stale: false
+                    source:
+                      sourceId: itcs-prod
+                      kind: ITCS
+                      revision: 42
+                      sourceVersion: 42
+                      lastReceivedAt: '2026-11-21T09:05:00.123456Z'
+                      lastSuccessAt: '2026-11-21T09:05:01.000000Z'
+                      batchStatus: SUCCEEDED
+                      stale: false
+                      staleAfterSeconds: 90
+                    events:
+                      - eventId: evt-0004
+                        type: heartbeat
+                        eventSeq: 43
+                        occurredAt: '2026-11-21T09:05:00.500000Z'
+                        incident: null
+        '304':
+          description: 'С указанного `eventSeq` изменений не было.'
+        '400':
+          description: Некорректный запрос.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missingSinceEventSeq:
+                  summary: Обязательный sinceEventSeq отсутствует
+                  value: {"code": "INVALID_EVENT_SEQ", "message": "sinceEventSeq is required"}
+                eventSeqOverflow:
+                  summary: sinceEventSeq вне int64
+                  value: {"code": "INVALID_EVENT_SEQ", "message": "sinceEventSeq must be in [0, 9223372036854775807]"}
+        '401':
+          description: Нет допустимой сессии или токена.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                cookieAuthRequired:
+                  summary: Нет сессии интерфейса
+                  value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
+  /api/dashboard/events/ack:
+    post:
+      operationId: acknowledgeEvents
+      summary: Подтвердить точный набор eventId (KAN-7)
+      description: |
+        Идемпотентно: повтор того же набора — тот же `200` и `eventSeq`. Порядок не
+        важен. Набор сравнивается целиком: неизвестный, чужой или уже вытесненный `eventId` —
+        `400 ACK_EVENT_UNKNOWN`, и ничего не подтверждается.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/EventAckRequest'
+            examples:
+              twoEvents:
+                summary: Оба события INC000021095533 (fixture events-ack-request)
+                x-fixture: events-ack-request
+                value:
+                  eventIds:
+                    - evt-0002
+                    - evt-0003
+      responses:
+        '200':
+          description: 'Набор подтверждён; `eventSeq` — подтверждённая позиция.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/EventAck'
+              examples:
+                twoEvents:
+                  summary: Подтверждены evt-0002 и evt-0003 (fixture events-ack-response)
+                  x-fixture: events-ack-response
+                  value:
+                    eventSeq: 43
+                    confirmedEventIds:
+                      - evt-0002
+                      - evt-0003
+                    status: acknowledged
+        '400':
+          description: Некорректный набор.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unknownEvent:
+                  summary: eventId не входит в журнал
+                  value: {"code": "ACK_EVENT_UNKNOWN", "message": "Unknown eventId evt-0009"}
+                emptySet:
+                  summary: Пустой набор eventId
+                  value: {"code": "ACK_EVENTS_INVALID", "message": "eventIds must contain 1-1000 unique ids"}
+                duplicateIds:
+                  summary: Повтор внутри набора eventId
+                  value: {"code": "ACK_EVENTS_INVALID", "message": "eventIds must contain no duplicates"}
+        '401':
+          description: Нет допустимой сессии или токена.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                cookieAuthRequired:
+                  summary: Нет сессии интерфейса
+                  value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
+components:
+  securitySchemes:
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: SESSION
+      description: 'Сессия интерфейса координатора; неаутентифицированный браузер перенаправляется на форму входа (`302`).'
+    machineBearer:
+      type: http
+      scheme: bearer
+      x-prospective: true
+      description: |
+        Предлагается, не развёрнуто: JWT Keycloak для машинного мониторинга.
+        Проверяются `iss`, подпись JWKS, `exp`, `aud`; остальное — как `machineBearer` в
+        `itsm-ingest.openapi.yaml`.
+  schemas:
+    IncidentId:
+      type: string
+      pattern: '^INC[0-9]{6,18}$'
+      description: 'Строковый INC. Числовой JSON `id` недопустим.'
+    UtcInstant:
+      type: string
+      format: date-time
+      pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?(Z|\+00:00)$'
+      description: 'UTC, ISO-8601: `YYYY-MM-DDTHH:MM:SS[.ffffff]Z`. Иные смещения и локальное время не допускаются.'
+    EventSeq:
+      type: integer
+      format: int64
+      minimum: 0
+      maximum: 9223372036854775807
+      description: 'Счётчик изменений опубликованных данных. Версия блока статуса, не снимка.'
+    PublishedRevision:
+      type: integer
+      format: int64
+      minimum: 0
+      description: 'Опубликованная версия источника из последнего успешного пакета. `0` — публикации ещё нет.'
+    IncidentGroupKey:
+      type: string
+      enum:
+        - critical
+        - high
+        - coordinator
+        - research
+      description: |
+        `critical` — активный P4; `high` — активный P3; `coordinator` — активный или
+        Research с назначением на координаторов массовых инцидентов; `research` —
+        `stateEnum = Research` при любой дате устранения.
+    ItsmIncidentState:
+      type: string
+      enum:
+        - Assigned
+        - WorkInProgress
+        - Resolved
+        - Closed
+        - Research
+    IncidentGroupMembership:
+      type: object
+      required:
+        - group
+        - matchedRule
+      properties:
+        group:
+          $ref: '#/components/schemas/IncidentGroupKey'
+        matchedRule:
+          type: string
+          description: 'Правило, по которому INC попал в группу.'
+      additionalProperties: false
+    IncidentSummary:
+      type: object
+      required:
+        - id
+        - stateEnum
+        - priorityId
+        - submitDate
+        - deadline
+        - groupMemberships
+      description: Строка списка групп.
+      properties:
+        id:
+          $ref: '#/components/schemas/IncidentId'
+        productName:
+          type:
+            - string
+            - 'null'
+        assignedGroupName:
+          type:
+            - string
+            - 'null'
+        stateEnum:
+          $ref: '#/components/schemas/ItsmIncidentState'
+        priorityId:
+          type: integer
+          minimum: 1
+          maximum: 4
+        submitDate:
+          $ref: '#/components/schemas/UtcInstant'
+        deadline:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+          description: '`null` — срока нет.'
+        completionDate:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+        groupMemberships:
+          type: array
+          description: 'Все группы INC, отсортированы по `group`.'
+          items:
+            $ref: '#/components/schemas/IncidentGroupMembership'
+      additionalProperties: false
+    IncidentCard:
+      type: object
+      description: Карточка INC (карточка в ITSM).
+      required:
+        - id
+        - stateEnum
+        - priorityId
+        - submitDate
+        - deadline
+        - groupMemberships
+        - eventSeq
+        - revision
+      properties:
+        id:
+          $ref: '#/components/schemas/IncidentId'
+        header:
+          type:
+            - string
+            - 'null'
+        description:
+          type:
+            - string
+            - 'null'
+        productName:
+          type:
+            - string
+            - 'null'
+        productMasterId:
+          type:
+            - string
+            - 'null'
+        service:
+          type:
+            - string
+            - 'null'
+        serviceType:
+          type:
+            - string
+            - 'null'
+        assignedGroupName:
+          type:
+            - string
+            - 'null'
+        stateEnum:
+          $ref: '#/components/schemas/ItsmIncidentState'
+        stateReason:
+          type:
+            - string
+            - 'null'
+        priorityId:
+          type: integer
+          minimum: 1
+          maximum: 4
+        submitDate:
+          $ref: '#/components/schemas/UtcInstant'
+        lastAssignmentToTeamDateTime:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+        deadline:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+          description: '`null` — срока нет; отсутствие или `0001-01-01T00:00:00Z` в снимке.'
+        completionDate:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+          description: 'Только у завершённых (`Resolved`, `Closed`, `Research`); у активных — `null`.'
+        solution:
+          type:
+            - string
+            - 'null'
+          description: 'Только у завершённых; у активных — `null`.'
+        groupMemberships:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncidentGroupMembership'
+        eventSeq:
+          $ref: '#/components/schemas/EventSeq'
+        revision:
+          $ref: '#/components/schemas/PublishedRevision'
+      additionalProperties: false
+    IncidentList:
+      type: object
+      required:
+        - eventSeq
+        - revision
+        - beforeFirstSuccess
+        - groups
+        - items
+        - nextCursor
+      properties:
+        eventSeq:
+          $ref: '#/components/schemas/EventSeq'
+        revision:
+          $ref: '#/components/schemas/PublishedRevision'
+        beforeFirstSuccess:
+          type: boolean
+          description: '`true`, пока нет ни одной опубликованной версии: списки пусты, группы пусты.'
+        groups:
+          type: array
+          description: 'Группы дашборда в порядке отображения; при `beforeFirstSuccess` — `[]`.'
+          items:
+            $ref: '#/components/schemas/IncidentGroup'
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncidentSummary'
+        nextCursor:
+          type:
+            - string
+            - 'null'
+          description: '`null` — страниц больше нет.'
+      additionalProperties: false
+    IncidentGroup:
+      type: object
+      required:
+        - key
+        - title
+        - rule
+        - active
+        - incidentCount
+        - incidents
+        - fixed
+      description: 'Группа дашборда. Пустая группа — `incidents: []` и `incidentCount: 0`.'
+      properties:
+        key:
+          $ref: '#/components/schemas/IncidentGroupKey'
+        title:
+          type: string
+        rule:
+          type: string
+        active:
+          type: boolean
+          description: 'Активные — `critical`, `high`, `coordinator`; `research` — завершённая.'
+        incidentCount:
+          type: integer
+          minimum: 0
+        incidents:
+          type: array
+          items:
+            $ref: '#/components/schemas/IncidentSummary'
+        fixed:
+          anyOf:
+            - $ref: '#/components/schemas/EventSeq'
+            - type: 'null'
+          description: '`null`: состав групп меняется с событиями, поэтому не фиксируется.'
+      additionalProperties: false
+    IncidentNotFound:
+      type: object
+      required:
+        - code
+        - message
+        - eventSeq
+        - revision
+      properties:
+        code:
+          type: string
+          const: INCIDENT_NOT_FOUND
+        message:
+          type: string
+          minLength: 1
+        eventSeq:
+          $ref: '#/components/schemas/EventSeq'
+        revision:
+          $ref: '#/components/schemas/PublishedRevision'
+      additionalProperties: false
+    SourceList:
+      type: object
+      required:
+        - eventSeq
+        - revision
+        - sources
+      properties:
+        eventSeq:
+          $ref: '#/components/schemas/EventSeq'
+        revision:
+          $ref: '#/components/schemas/PublishedRevision'
+          description: Глобальная опубликованная версия для интерфейса.
+        sources:
+          type: array
+          items:
+            $ref: '#/components/schemas/SourceStatus'
+      additionalProperties: false
+    SourceStatus:
+      type: object
+      required:
+        - sourceId
+        - kind
+        - revision
+        - sourceVersion
+        - lastReceivedAt
+        - lastSuccessAt
+        - batchStatus
+        - stale
+        - staleAfterSeconds
+      properties:
+        sourceId:
+          type: string
+        kind:
+          type: string
+          enum:
+            - ITCS
+        revision:
+          $ref: '#/components/schemas/PublishedRevision'
+        sourceVersion:
+          anyOf:
+            - type: integer
+              minimum: 1
+            - type: 'null'
+          description: 'Последняя доставка. Не `revision` и не `eventSeq`.'
+        lastReceivedAt:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+        lastSuccessAt:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+        batchStatus:
+          type:
+            - string
+            - 'null'
+          enum:
+            - RECEIVED
+            - PROCESSING
+            - SUCCEEDED
+            - FAILED
+            - null
+          description: Статус последнего принятого пакета.
+        stale:
+          type: boolean
+        staleAfterSeconds:
+          type: integer
+          minimum: 1
+      additionalProperties: false
+    IncidentChange:
+      type: object
+      required:
+        - id
+        - groupMemberships
+      properties:
+        id:
+          $ref: '#/components/schemas/IncidentId'
+        groupMemberships:
+          type: array
+          description: 'Группы INC после изменения; для `removed` — группы, в которых он был.'
+          items:
+            $ref: '#/components/schemas/IncidentGroupMembership'
+      additionalProperties: false
+    DashboardEvent:
+      type: object
+      required:
+        - eventId
+        - type
+        - eventSeq
+        - occurredAt
+        - incident
+      properties:
+        eventId:
+          type: string
+          pattern: '^evt-[0-9]{4,}$'
+        type:
+          type: string
+          enum:
+            - upserted
+            - removed
+            - heartbeat
+        eventSeq:
+          $ref: '#/components/schemas/EventSeq'
+          description: 'Метка события; следующий опрос — с `nextEventSeq`.'
+        occurredAt:
+          $ref: '#/components/schemas/UtcInstant'
+        incident:
+          anyOf:
+            - $ref: '#/components/schemas/IncidentChange'
+            - type: 'null'
+          description: '`null` только для `heartbeat`.'
+      additionalProperties: false
+    EventBatch:
+      type: object
+      required:
+        - eventSeq
+        - nextEventSeq
+        - stale
+        - source
+        - events
+      properties:
+        eventSeq:
+          $ref: '#/components/schemas/EventSeq'
+          description: 'Текущий `eventSeq` публикации на момент ответа.'
+        nextEventSeq:
+          $ref: '#/components/schemas/EventSeq'
+          description: 'Курсор следующего опроса (`0`, если продолжать нечем).'
+        stale:
+          type: boolean
+          description: '`true` — данных нет давно; клиент показывает публикацию как устаревшую.'
+        source:
+          anyOf:
+            - $ref: '#/components/schemas/SourceStatus'
+            - type: 'null'
+        events:
+          type: array
+          items:
+            $ref: '#/components/schemas/DashboardEvent'
+      additionalProperties: false
+    EventAckRequest:
+      type: object
+      required:
+        - eventIds
+      properties:
+        eventIds:
+          type: array
+          minItems: 1
+          maxItems: 1000
+          uniqueItems: true
+          items:
+            type: string
+            pattern: '^evt-[0-9]{4,}$'
+          description: 'Точный набор `eventId` из ответа `events`.'
+      additionalProperties: false
+    EventAck:
+      type: object
+      required:
+        - eventSeq
+        - confirmedEventIds
+        - status
+      properties:
+        eventSeq:
+          $ref: '#/components/schemas/EventSeq'
+          description: 'Наивысший полностью подтверждённый `eventSeq`.'
+        confirmedEventIds:
+          type: array
+          items:
+            type: string
+            pattern: '^evt-[0-9]{4,}$'
+        status:
+          type: string
+          enum:
+            - acknowledged
+      additionalProperties: false
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      properties:
+        code:
+          type: string
+          minLength: 1
+          pattern: '^[A-Z][A-Z0-9_]*$'
+        message:
+          type: string
+          minLength: 1
+      additionalProperties: false

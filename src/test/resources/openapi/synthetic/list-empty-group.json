@@ -1,0 +1,45 @@
+{
+  "eventSeq": 43,
+  "revision": 42,
+  "beforeFirstSuccess": false,
+  "groups": [
+    {
+      "key": "critical",
+      "title": "Критические",
+      "rule": "Активный инцидент с priorityId = 4",
+      "active": true,
+      "incidentCount": 0,
+      "incidents": [],
+      "fixed": null
+    },
+    {
+      "key": "high",
+      "title": "Высокий приоритет",
+      "rule": "Активный инцидент с priorityId = 3",
+      "active": true,
+      "incidentCount": 0,
+      "incidents": [],
+      "fixed": null
+    },
+    {
+      "key": "coordinator",
+      "title": "На координаторах",
+      "rule": "Активный инцидент или Research, назначенный на координаторов",
+      "active": true,
+      "incidentCount": 0,
+      "incidents": [],
+      "fixed": null
+    },
+    {
+      "key": "research",
+      "title": "Исследование ситуации",
+      "rule": "stateEnum = Research; карточка видна и с датой устранения",
+      "active": false,
+      "incidentCount": 0,
+      "incidents": [],
+      "fixed": null
+    }
+  ],
+  "items": [],
+  "nextCursor": null
+}

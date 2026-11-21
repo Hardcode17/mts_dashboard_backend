@@ -63,3 +63,10 @@ dependencyManagement {
 tasks.withType<Test> {
 	useJUnitPlatform()
 }
+
+tasks.processResources {
+	from("docs") {
+		include("*.openapi.yaml")
+		into("static/openapi")
+	}
+}

@@ -1,0 +1,30 @@
+{
+  "id": "INC000021095532",
+  "header": "Часть заказов не оплачивается через СБП",
+  "description": "Синтетическое описание для контрактных примеров KAN-20.",
+  "productName": "Оплата заказов",
+  "productMasterId": "BI_pay",
+  "service": "checkout-api",
+  "serviceType": "Клиентский",
+  "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов",
+  "stateEnum": "WorkInProgress",
+  "stateReason": null,
+  "priorityId": 4,
+  "submitDate": "2026-11-21T09:01:00Z",
+  "lastAssignmentToTeamDateTime": "2026-11-21T09:01:00Z",
+  "deadline": null,
+  "completionDate": null,
+  "solution": null,
+  "groupMemberships": [
+    {
+      "group": "coordinator",
+      "matchedRule": "assignedToCoordinators"
+    },
+    {
+      "group": "critical",
+      "matchedRule": "priorityId = 4"
+    }
+  ],
+  "eventSeq": 43,
+  "revision": 42
+}

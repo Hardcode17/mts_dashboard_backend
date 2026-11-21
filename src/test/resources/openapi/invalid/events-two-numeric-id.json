@@ -1,0 +1,17 @@
+[
+  {
+    "eventId": "evt-0002",
+    "type": "upserted",
+    "eventSeq": 43,
+    "occurredAt": "2026-11-21T09:05:00.500000Z",
+    "incident": {
+      "id": 21095533,
+      "groupMemberships": [
+        {
+          "group": "high",
+          "matchedRule": "priorityId = 3"
+        }
+      ]
+    }
+  }
+]

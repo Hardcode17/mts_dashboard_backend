@@ -1,0 +1,17 @@
+{
+  "eventSeq": 43,
+  "revision": 42,
+  "sources": [
+    {
+      "sourceId": "itcs-prod",
+      "kind": "ITCS",
+      "revision": 42,
+      "sourceVersion": 42,
+      "lastReceivedAt": "2026-11-21T09:05:00.123456Z",
+      "lastSuccessAt": "2026-11-21T09:05:01.000000Z",
+      "batchStatus": "SUCCEEDED",
+      "stale": false,
+      "staleAfterSeconds": 90
+    }
+  ]
+}

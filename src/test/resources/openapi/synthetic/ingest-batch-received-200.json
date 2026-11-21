@@ -1,0 +1,9 @@
+{
+  "batchId": "3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11",
+  "sourceId": "itcs-prod",
+  "sourceVersion": 42,
+  "receivedAt": "2026-11-21T09:05:00.123456Z",
+  "status": "RECEIVED",
+  "diagnostic": null,
+  "nextAttemptAt": null
+}

@@ -1,0 +1,8 @@
+{
+  "eventSeq": 43,
+  "confirmedEventIds": [
+    "evt-0002",
+    "evt-0003"
+  ],
+  "status": "acknowledged"
+}

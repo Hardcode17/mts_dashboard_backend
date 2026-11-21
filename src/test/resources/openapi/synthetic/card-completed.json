@@ -1,0 +1,26 @@
+{
+  "id": "INC000021095537",
+  "header": "Виджет корзины показывал ошибку",
+  "description": "Синтетическое описание для контрактных примеров KAN-20.",
+  "productName": "Оплата заказов",
+  "productMasterId": "BI_pay",
+  "service": "checkout-api",
+  "serviceType": "Клиентский",
+  "assignedGroupName": "Онлайн-магазин",
+  "stateEnum": "Closed",
+  "stateReason": "решено",
+  "priorityId": 2,
+  "submitDate": "2026-11-19T10:00:00Z",
+  "lastAssignmentToTeamDateTime": "2026-11-19T10:00:00Z",
+  "deadline": "2026-11-19T18:00:00Z",
+  "completionDate": "2026-11-19T16:30:00Z",
+  "solution": "Откатан релиз виджета",
+  "groupMemberships": [
+    {
+      "group": "critical",
+      "matchedRule": "priorityId = 4"
+    }
+  ],
+  "eventSeq": 43,
+  "revision": 42
+}

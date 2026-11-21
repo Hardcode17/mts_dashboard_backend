@@ -1,0 +1,25 @@
+{
+  "eventSeq": 43,
+  "nextEventSeq": 43,
+  "stale": false,
+  "source": {
+    "sourceId": "itcs-prod",
+    "kind": "ITCS",
+    "revision": 42,
+    "sourceVersion": 42,
+    "lastReceivedAt": "2026-11-21T09:05:00.123456Z",
+    "lastSuccessAt": "2026-11-21T09:05:01.000000Z",
+    "batchStatus": "SUCCEEDED",
+    "stale": false,
+    "staleAfterSeconds": 90
+  },
+  "events": [
+    {
+      "eventId": "evt-0004",
+      "type": "heartbeat",
+      "eventSeq": 43,
+      "occurredAt": "2026-11-21T09:05:00.500000Z",
+      "incident": null
+    }
+  ]
+}

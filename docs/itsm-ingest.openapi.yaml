@@ -1,86 +1,922 @@
 openapi: 3.1.0
 info:
   title: Приём полного снимка ITSM
-  version: 0.1.0
-  description: Предлагаемый контракт отправителя KAN-53 для согласования с приёмником KAN-27.
+  version: 1.0.0
+  description: |
+    Канонический контракт машинной интеграции ITCS → dashboard по KAN-20: отправитель KAN-53 и приёмник KAN-27. Реализовано в ветке KAN-27 (приёмник) и в `itsm-mock` (KAN-53, отправитель).
+    ## Как читать документ
+    Каждая операция описана один раз — в `paths`, по своему маршруту: `POST /api/integrations/itsm/batches` — машина ITCS передаёт полный снимок (машинный Bearer, массив INC, идентификатор и версия пакета в заголовках, `202` с `Location`); `GET /api/integrations/itsm/batches/{batchId}` — чтение состояния пакета; `GET /api/snapshot/status` — опубликованная версия и свежесть. Это общий для всех операций маршрут чтения (§ "Один канонический маршрут для каждого чтения").
+    Исходящее событие того же приёма опубликовано отдельно в `webhooks` с теми же схемами и примерами (`POST /api/integrations/itsm/batches`). Семантика события остаётся webhook-овой и не зависит от того, в каком разделе её показывают.
+    ## Что уже развёрнуто, а что предлагается
+    - Развёрнуто (KAN-27): `POST /api/integrations/itsm/batches`, `GET /api/integrations/itsm/batches/{batchId}` и `GET /api/snapshot/status`. Приложение публикует свой OpenAPI-документ (`/swagger-ui.html`, `/api-docs.yaml`). - Ветка KAN-53 (`itsm-mock`) совпадает с приёмником по пути, трём заголовкам, массиву INC и ответу `202` с `Location`; она ожидает необязательное `payload` в `202`/`409`. - Предлагается, но не развёрнуто: `payload`, `Idempotent-Replayed`, `application/problem+json` для `422`, машинный Bearer для `GET /api/snapshot/status` (`machineBearerProspective`). Сейчас статус открыт цепочкой формы и HTTP Basic (`form-or-basic`). - Чтения KAN-7 (список, карточка, статус источника, polling, ack) — отдельный документ `dashboard-api.openapi.yaml`. Их контроллеров пока нет.
+    ## Каждые 30 секунд — полный снимок, а не список изменений
+    Подтверждённый контракт ITCS: отправитель каждые 30 секунд передаёт полный снимок текущей выгрузки — все INC, включая неизменившиеся. Это не дельта. Примеры `minimal` и `nextTick` отличаются ровно одним INC (`INC000021095533`).
+    ## Версия источника, revision и eventSeq
+    `X-Source-Version` — версия выгрузки отправителя (**sourceVersion**). `revision` в `GET /api/snapshot/status` — **опубликованная** версия источника, которую видит фронт (`null` до первой успешной обработки). `eventSeq` (KAN-7) — счётчик изменений опубликованных данных. Это три разные величины: `202` не публикует данные.
+    ## Ошибки
+    Все JSON-ошибки — `ErrorResponse` (`code`, `message`) и `X-Request-Id`. Коды стабильны, тексты `message` — нет.
+    ## Примеры
+    Примеры синтетические. Те же объекты лежат в `src/test/resources/openapi/synthetic/`; `*IT` сверяет примеры с фикстурами и валидирует их по `components.schemas`. Негативные фикстуры — в `src/test/resources/openapi/invalid/`.
 paths:
   /api/integrations/itsm/batches:
     post:
-      summary: Принять полный снимок инцидентов
+      operationId: receiveItsmBatch
+      summary: 'Принять полный снимок инцидентов (deployed, KAN-53 → KAN-27)'
+      description: 'Тело — JSON-массив INC. Развёрнутая версия сохраняет его байт-в-байт; записи не переписываются и не проверяются (это KAN-21). Строгий JSON: иной верхний уровень или лишний JSON-значение — `400 ITSM_INVALID_PAYLOAD`, ничего не сохраняется. Массив `[]` допустим и тоже сохраняется. `202` подтверждает приём: публикация — позже, воркером. '
       security:
         - machineBearer: []
       parameters:
-        - in: header
-          name: Idempotency-Key
+        - name: Idempotency-Key
+          in: header
           required: true
-          description: UUID пакета. Повтор доставки сохраняет этот ключ, версию и тело.
+          description: 'UUID пакета, он же `batchId` и последний сегмент `Location`. Повтор доставки сохраняет ключ, версию и байты; иные метаданные или байты — `409 ITSM_IDEMPOTENCY_CONFLICT`. '
           schema:
             type: string
-            format: uuid
-        - in: header
-          name: X-Source-Id
+            minLength: 36
+            maxLength: 36
+            pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          examples:
+            sourceBatch:
+              summary: Пакет версии 42
+              value: 3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11
+            nextTickBatch:
+              summary: Пакет версии 43
+              value: 5b8e2c4d-1f6a-4d3b-8e27-9c0a1b2d3e4f
+        - name: X-Source-Id
+          in: header
           required: true
-          description: Постоянный идентификатор экземпляра источника.
+          description: 'Постоянный идентификатор экземпляра источника: 1–128 видимых ASCII.'
           schema:
             type: string
-        - in: header
-          name: X-Source-Version
+            minLength: 1
+            maxLength: 128
+            pattern: '^[\u0021-\u007E]{1,128}$'
+          examples:
+            itcs:
+              value: itcs-prod
+        - name: X-Source-Version
+          in: header
           required: true
-          description: Монотонная версия полного снимка в пределах источника.
+          description: 'Монотонная версия полного снимка: десятичное целое `int64 >= 1` без знака и ведущих нулей (максимум 9223372036854775807). Уникальна для источника: та же версия с другим ключом — `409 ITSM_SOURCE_VERSION_CONFLICT`. Развёрнутый приёмник не требует строгого возрастания. Не `revision` и не `eventSeq`. '
           schema:
-            type: integer
-            format: int64
-            minimum: 1
+            type: string
+            pattern: '^[1-9][0-9]{0,18}$'
+            x-format: int64
+          examples:
+            sourceBatch:
+              value: 42
+            nextTickBatch:
+              value: 43
       requestBody:
         required: true
+        description: 'Полный массив INC текущей выгрузки, включая неизменившиеся; `[]` допустим. `minimal` и `nextTick` — полные снимки через 30 секунд, отличаются лишь `priorityId` у `INC000021095533`. '
         content:
           application/json:
             schema:
-              type: array
-              items:
-                type: object
-                required: [id]
-                properties:
-                  id:
-                    type: string
-                additionalProperties: true
+              $ref: '#/components/schemas/ItsmIncidentSnapshot'
             examples:
               empty:
                 summary: Полный снимок без активных записей
                 value: []
+              minimal:
+                summary: 'Полный снимок в 09:05:00, два INC (fixture snapshot-minimal)'
+                x-fixture: snapshot-minimal
+                value: [{"id": "INC000021095531", "header": "Не проходят оплаты картой", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T09:05:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T09:05:00Z", "priorityId": 4, "priority": "Наивысший", "stateEnum": "Assigned", "stateId": 0, "state": "Assigned", "stateReason": null, "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-21T12:00:00Z", "completionDate": null, "solution": null}, {"id": "INC000021095533", "header": "Замедлены возвраты", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T09:02:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T09:02:00Z", "priorityId": 3, "priority": "Высокий", "stateEnum": "WorkInProgress", "stateId": 2, "state": "WorkInProgress", "stateReason": null, "assignedGroupName": "Payment Ops", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-21T18:00:00Z", "completionDate": null, "solution": null}]
+              nextTick:
+                summary: 'Тот же снимок в 09:05:30, изменился только INC000021095533 (fixture snapshot-next-tick)'
+                x-fixture: snapshot-next-tick
+                value: [{"id": "INC000021095531", "header": "Не проходят оплаты картой", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T09:05:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T09:05:00Z", "priorityId": 4, "priority": "Наивысший", "stateEnum": "Assigned", "stateId": 0, "state": "Assigned", "stateReason": null, "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-21T12:00:00Z", "completionDate": null, "solution": null}, {"id": "INC000021095533", "header": "Замедлены возвраты", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T09:02:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T09:02:00Z", "priorityId": 4, "priority": "Наивысший", "stateEnum": "WorkInProgress", "stateId": 2, "state": "WorkInProgress", "stateReason": null, "assignedGroupName": "Payment Ops", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-21T18:00:00Z", "completionDate": null, "solution": null}]
+              sourceBatchRequest:
+                summary: 'Снимок с INC без срока, P4 в двух группах, Research и второй версией (fixture source-batch-request)'
+                x-fixture: source-batch-request
+                value: [{"id": "INC000021095531", "header": "Не проходят оплаты картой", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T09:05:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T09:05:00Z", "priorityId": 4, "priority": "Наивысший", "stateEnum": "Assigned", "stateId": 0, "state": "Assigned", "stateReason": null, "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-21T12:00:00Z", "completionDate": null, "solution": null}, {"id": "INC000021095532", "header": "Часть заказов не оплачивается через СБП", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T09:01:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T09:01:00Z", "priorityId": 4, "priority": "Наивысший", "stateEnum": "WorkInProgress", "stateId": 2, "state": "WorkInProgress", "stateReason": null, "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "completionDate": null, "solution": null}, {"id": "INC000021095533", "header": "Замедлены возвраты", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T09:02:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T09:02:00Z", "priorityId": 3, "priority": "Высокий", "stateEnum": "WorkInProgress", "stateId": 2, "state": "WorkInProgress", "stateReason": null, "assignedGroupName": "Payment Ops", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-21T18:00:00Z", "completionDate": null, "solution": null}, {"id": "INC000021095534", "header": "Медленная загрузка каталога", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T08:55:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T08:55:00Z", "priorityId": 2, "priority": "Средний", "stateEnum": "Assigned", "stateId": 0, "state": "Assigned", "stateReason": null, "assignedGroupName": "Онлайн-магазин", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-22T09:00:00Z", "completionDate": null, "solution": null}, {"id": "INC000021095539", "header": "Ошибки авторизации в приложении", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-20T15:00:00Z", "lastAssignmentToTeamDateTime": "2026-11-20T15:00:00Z", "priorityId": 3, "priority": "Высокий", "stateEnum": "Research", "stateId": 8, "state": "Research", "stateReason": "решено", "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-20T20:00:00Z", "completionDate": "2026-11-20T19:40:00Z", "solution": "Перезапущен пул соединений БД"}, {"id": "INC000021095537", "header": "Виджет корзины показывал ошибку", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-19T10:00:00Z", "lastAssignmentToTeamDateTime": "2026-11-19T10:00:00Z", "priorityId": 2, "priority": "Средний", "stateEnum": "Closed", "stateId": 10, "state": "Closed", "stateReason": "решено", "assignedGroupName": "Онлайн-магазин", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-19T18:00:00Z", "completionDate": "2026-11-19T16:30:00Z", "solution": "Откатан релиз виджета"}, {"id": "INC000021095538", "header": "Высокий процент отказов платёжного шлюза", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T09:03:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T09:03:00Z", "priorityId": 3, "priority": "Высокий", "stateEnum": "WorkInProgress", "stateId": 2, "state": "WorkInProgress", "stateReason": null, "assignedGroupName": "Оплата", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-24T18:00:00Z", "completionDate": null, "solution": null}]
       responses:
         '202':
-          description: Пакет принят для фоновой обработки.
+          description: 'Пакет принят и зафиксирован до ответа. Первый приём и идемпотентный повтор возвращают одинаковые тело и `Location`. '
           headers:
             Location:
+              required: true
+              description: Относительный URI метаданных пакета; абсолютный строится от текущего хоста.
               schema:
                 type: string
           content:
             application/json:
               schema:
-                type: object
-                required: [batchId]
-                properties:
-                  batchId:
-                    type: string
+                $ref: '#/components/schemas/ItsmBatchAccepted'
+              examples:
+                firstAccept:
+                  summary: Первый приём (fixture ingest-accepted-202)
+                  x-fixture: ingest-accepted-202
+                  value: {"batchId": "3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11"}
+                idempotentReplay:
+                  summary: 'Повтор теми же байтами возвращает тот же batchId'
+                  x-fixture: ingest-accepted-replay-202
+                  value: {"batchId": "3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11"}
         '400':
-          description: Некорректный вход.
+          description: Некорректный вход; ничего не сохраняется.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidIdempotencyKey:
+                  summary: Idempotency-Key не UUID
+                  value: {"code": "ITSM_INVALID_IDEMPOTENCY_KEY", "message": "Idempotency-Key must be a UUID"}
+                invalidSourceId:
+                  summary: Источник не 1–128 видимых ASCII
+                  value: {"code": "ITSM_INVALID_SOURCE_ID", "message": "X-Source-Id must be 1-128 visible ASCII characters"}
+                invalidSourceVersion:
+                  summary: Версия не положительное 64-битное целое
+                  value: {"code": "ITSM_INVALID_SOURCE_VERSION", "message": "X-Source-Version must be a positive 64-bit integer"}
+                invalidPayload:
+                  summary: Тело не одиночный JSON-массив
+                  value: {"code": "ITSM_INVALID_PAYLOAD", "message": "Request body must be a single JSON array"}
+                invalidRecord:
+                  summary: Запись отклонена проверкой KAN-21
+                  value: {"code": "ITSM_INVALID_RECORD", "message": "ITSM record in snapshot at index 0 has invalid field id: must be a string"}
+                duplicateRecord:
+                  summary: Идентификатор INC повторяется в снимке
+                  value: {"code": "ITSM_DUPLICATE_RECORD", "message": "ITSM snapshot contains duplicate id; record at index 1 repeats index 0"}
         '401':
-          description: Требуется токен машинного клиента.
+          description: 'Нет, просрочен или невалиден машинный Bearer (issuer, подпись JWKS, audience). Ответляет точка входа машинной цепочки.'
+          headers:
+            WWW-Authenticate:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                machineAuthRequired:
+                  summary: Нет или невалиден машинный Bearer
+                  value: {"code": "ITSM_MACHINE_AUTH_REQUIRED", "message": "Machine bearer token is required"}
         '403':
-          description: Токен без права импорта.
+          description: 'Токен без машинного `azp` или без права импорта.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                machineAccessDenied:
+                  summary: Токен без машинного azp или права импорта
+                  value: {"code": "ITSM_MACHINE_ACCESS_DENIED", "message": "Machine client identity or itsm import permission is missing"}
         '409':
-          description: Ключ пакета уже использован для другого тела.
+          description: Конфликт ключа или версии; состояние БД не меняется.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                idempotencyConflict:
+                  summary: Ключ переиспользован с другими данными
+                  value: {"code": "ITSM_IDEMPOTENCY_CONFLICT", "message": "Idempotency-Key was already used with different request metadata or payload"}
+                sourceVersionConflict:
+                  summary: Источник и версия уже приняты с другим ключом
+                  value: {"code": "ITSM_SOURCE_VERSION_CONFLICT", "message": "Source version was already accepted with a different idempotency key"}
         '413':
-          description: Пакет превышает ограничение на размер тела.
+          description: 'Тело больше ограничения LoggerFilter (`REQUEST_BODY_TOO_LARGE`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                bodyTooLarge:
+                  summary: Тело больше ограничения
+                  value: {"code": "REQUEST_BODY_TOO_LARGE", "message": "Request body exceeds 1048576 bytes"}
+        '415':
+          description: 'Content-Type не `application/json`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unsupportedMediaType:
+                  summary: Content-Type не application/json
+                  value: {"code": "UNSUPPORTED_MEDIA_TYPE", "message": "Content type is not supported"}
         '422':
-          description: Снимок отклонён валидатором, если проверка выполняется до постановки в очередь.
+          description: Снимок отклонён валидатором записей до постановки в очередь. Возможен только если проверка выполняется перед записью; развёрнутая версия KAN-27 этот ответ не возвращает.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ItsmExpectedProblem'
+              examples:
+                invalidRecord:
+                  summary: 'Числовой INC отклонён (не развёрнуто, fixture ingest-problem-invalid-record)'
+                  x-fixture: ingest-problem-invalid-record
+                  value: {"type": "about:blank", "title": "ITSM snapshot was rejected", "status": 422, "code": "ITSM_INVALID_RECORD", "detail": "ITSM record in snapshot at index 0 has invalid field id: must be a string", "instance": "2026-11-21T09:05:00.123456Z"}
         '429':
-          description: Приёмник временно ограничил поток запросов.
+          description: 'Приёмник временно ограничил поток: очередь необработанных пакетов заполнена.'
+          headers:
+            Retry-After:
+              required: false
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                intakeQueueFull:
+                  summary: Очередь необработанных пакетов заполнена
+                  value: {"code": "ITSM_INTAKE_QUEUE_FULL", "message": "ITSM intake queue is full (1000 outstanding batches)"}
         '503':
           description: Приёмник временно недоступен.
+      x-event:
+        source: ITCS
+        delivery: server-to-server
+        webhook: /api/integrations/itsm/batches
+  '/api/integrations/itsm/batches/{batchId}':
+    get:
+      operationId: getItsmBatch
+      summary: Состояние принятого пакета (deployed)
+      description: 'Метаданные пакета без исходного payload. Пока пакет не обработан — `RECEIVED` или `PROCESSING`; после успеха — `SUCCEEDED`, иначе `FAILED` с `diagnostic`. Опубликованную `revision` возвращает `GET /api/snapshot/status`, а не этот маршрут. '
+      security:
+        - machineBearer: []
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          description: 'Значение `Idempotency-Key` принятого пакета.'
+          schema:
+            type: string
+            format: uuid
+          examples:
+            sourceBatch:
+              value: 3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11
+      responses:
+        '200':
+          description: Метаданные пакета.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItsmBatchMetadata'
+              examples:
+                received:
+                  summary: Пакет в очереди (fixture ingest-batch-received-200)
+                  x-fixture: ingest-batch-received-200
+                  value: {"batchId": "3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11", "sourceId": "itcs-prod", "sourceVersion": 42, "receivedAt": "2026-11-21T09:05:00.123456Z", "status": "RECEIVED", "diagnostic": null, "nextAttemptAt": null}
+                receivedAfterRetry:
+                  summary: 'Пакет, для которого назначен повтор (fixture ingest-batch-next-attempt-200)'
+                  x-fixture: ingest-batch-next-attempt-200
+                  value: {"batchId": "5b8e2c4d-1f6a-4d3b-8e27-9c0a1b2d3e4f", "sourceId": "itcs-prod", "sourceVersion": 43, "receivedAt": "2026-11-21T09:05:30.100000Z", "status": "RECEIVED", "diagnostic": null, "nextAttemptAt": "2026-11-21T09:06:00.100000Z"}
+                succeeded:
+                  summary: Опубликованный пакет (fixture ingest-batch-succeeded-200)
+                  x-fixture: ingest-batch-succeeded-200
+                  value: {"batchId": "3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11", "sourceId": "itcs-prod", "sourceVersion": 42, "receivedAt": "2026-11-21T09:05:00.123456Z", "status": "SUCCEEDED", "diagnostic": "applied snapshot revision 42", "nextAttemptAt": null}
+        '401':
+          description: Нет или невалиден машинный Bearer.
+          headers:
+            WWW-Authenticate:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                machineAuthRequired:
+                  summary: Нет или невалиден машинный Bearer
+                  value: {"code": "ITSM_MACHINE_AUTH_REQUIRED", "message": "Machine bearer token is required"}
+        '403':
+          description: Токен без права импорта.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                machineAccessDenied:
+                  summary: Токен без машинного azp или права импорта
+                  value: {"code": "ITSM_MACHINE_ACCESS_DENIED", "message": "Machine client identity or itsm import permission is missing"}
+        '404':
+          description: Пакет не найден.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                batchNotFound:
+                  summary: Пакет с таким batchId не найден
+                  value: {"code": "ITSM_BATCH_NOT_FOUND", "message": "ITSM batch 9c1f0e5a-8d2b-4a7e-b3c4-5d6e7f809112 not found"}
+      x-event:
+        source: ITCS
+        delivery: server-to-server
+        webhook: '/api/integrations/itsm/batches/{batchId}'
+  /api/snapshot/status:
+    get:
+      operationId: getSnapshotStatus
+      summary: Опубликованная версия снимка и его свежесть (deployed)
+      description: |
+        Состояние данных для интерфейса и отправителя. Все даты — UTC, ISO-8601 (`Z` или `+00:00`), до микросекунд.
+        - `lastReceivedAt` — приём последнего пакета; `202` не означает публикацию. - `lastSuccessAt` и `revision` — последняя успешная обработка; `null`, пока успеха не было. - `stale` — `true`, пока последний принятый пакет не обработан успешно, или если новых снимков не было дольше `ITSM_INTAKE_STALE_AFTER` (по умолчанию 90 с; при снимке каждые 30 с допускается пропуск до трёх тиков).
+        `revision` — опубликованная версия источника. `eventSeq` — счётчик чтений KAN-7 (`dashboard-api.openapi.yaml`); это не одно и то же.
+      security:
+        - form-or-basic: []
+        - machineBearerProspective: []
+      responses:
+        '200':
+          description: Текущее состояние снимка.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotStatus'
+              examples:
+                beforeFirstSuccess:
+                  summary: 'Снимок принят, но ещё не опубликован — stale (fixture snapshot-status-stale)'
+                  x-fixture: snapshot-status-stale
+                  value: {"lastReceivedAt": "2026-11-21T09:05:00.123456Z", "lastSuccessAt": null, "revision": null, "stale": true}
+                published:
+                  summary: Опубликован revision 42 (fixture snapshot-status-published)
+                  x-fixture: snapshot-status-published
+                  value: {"lastReceivedAt": "2026-11-21T09:05:00.123456Z", "lastSuccessAt": "2026-11-21T09:05:01.000000Z", "revision": 42, "stale": false}
+                neverReceived:
+                  summary: Снимков ещё не было
+                  value: {"lastReceivedAt": null, "lastSuccessAt": null, "revision": null, "stale": true}
+        '302':
+          description: 'Развёрнутая версия: неаутентифицированный запрос из браузера перенаправляется на форму входа. Machine-клиент получает `401` без формы. '
+          headers:
+            Location:
+              required: true
+              schema:
+                type: string
+          content:
+            text/html:
+              schema:
+                type: string
+              examples:
+                loginForm:
+                  summary: 'HTML формы входа, на которую перенаправляет приложение'
+                  value: '<!DOCTYPE html><html><body><form method="post" action="/login"></form></body></html> '
+        '401':
+          description: 'Нет аутентификации: предлагаемая машинная цепочка отвечает JSON-ошибкой.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                machineAuthRequired:
+                  summary: Нет или невалиден машинный Bearer
+                  value: {"code": "ITSM_MACHINE_AUTH_REQUIRED", "message": "Machine bearer token is required"}
+      x-event:
+        source: ITCS
+        delivery: server-to-server
+        webhook: /api/snapshot/status
+webhooks:
+  /api/integrations/itsm/batches:
+    post:
+      operationId: receiveItsmBatch
+      summary: 'Принять полный снимок инцидентов (deployed, KAN-53 → KAN-27)'
+      description: 'Тело — JSON-массив INC. Развёрнутая версия сохраняет его байт-в-байт; записи не переписываются и не проверяются (это KAN-21). Строгий JSON: иной верхний уровень или лишний JSON-значение — `400 ITSM_INVALID_PAYLOAD`, ничего не сохраняется. Массив `[]` допустим и тоже сохраняется. `202` подтверждает приём: публикация — позже, воркером. '
+      security:
+        - machineBearer: []
+      parameters:
+        - name: Idempotency-Key
+          in: header
+          required: true
+          description: 'UUID пакета, он же `batchId` и последний сегмент `Location`. Повтор доставки сохраняет ключ, версию и байты; иные метаданные или байты — `409 ITSM_IDEMPOTENCY_CONFLICT`. '
+          schema:
+            type: string
+            minLength: 36
+            maxLength: 36
+            pattern: '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+          examples:
+            sourceBatch:
+              summary: Пакет версии 42
+              value: 3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11
+            nextTickBatch:
+              summary: Пакет версии 43
+              value: 5b8e2c4d-1f6a-4d3b-8e27-9c0a1b2d3e4f
+        - name: X-Source-Id
+          in: header
+          required: true
+          description: 'Постоянный идентификатор экземпляра источника: 1–128 видимых ASCII.'
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+            pattern: '^[\u0021-\u007E]{1,128}$'
+          examples:
+            itcs:
+              value: itcs-prod
+        - name: X-Source-Version
+          in: header
+          required: true
+          description: 'Монотонная версия полного снимка: десятичное целое `int64 >= 1` без знака и ведущих нулей (максимум 9223372036854775807). Уникальна для источника: та же версия с другим ключом — `409 ITSM_SOURCE_VERSION_CONFLICT`. Развёрнутый приёмник не требует строгого возрастания. Не `revision` и не `eventSeq`. '
+          schema:
+            type: string
+            pattern: '^[1-9][0-9]{0,18}$'
+            x-format: int64
+          examples:
+            sourceBatch:
+              value: 42
+            nextTickBatch:
+              value: 43
+      requestBody:
+        required: true
+        description: 'Полный массив INC текущей выгрузки, включая неизменившиеся; `[]` допустим. `minimal` и `nextTick` — полные снимки через 30 секунд, отличаются лишь `priorityId` у `INC000021095533`. '
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ItsmIncidentSnapshot'
+            examples:
+              empty:
+                summary: Полный снимок без активных записей
+                value: []
+              minimal:
+                summary: 'Полный снимок в 09:05:00, два INC (fixture snapshot-minimal)'
+                x-fixture: snapshot-minimal
+                value: [{"id": "INC000021095531", "header": "Не проходят оплаты картой", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T09:05:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T09:05:00Z", "priorityId": 4, "priority": "Наивысший", "stateEnum": "Assigned", "stateId": 0, "state": "Assigned", "stateReason": null, "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-21T12:00:00Z", "completionDate": null, "solution": null}, {"id": "INC000021095533", "header": "Замедлены возвраты", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T09:02:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T09:02:00Z", "priorityId": 3, "priority": "Высокий", "stateEnum": "WorkInProgress", "stateId": 2, "state": "WorkInProgress", "stateReason": null, "assignedGroupName": "Payment Ops", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-21T18:00:00Z", "completionDate": null, "solution": null}]
+              nextTick:
+                summary: 'Тот же снимок в 09:05:30, изменился только INC000021095533 (fixture snapshot-next-tick)'
+                x-fixture: snapshot-next-tick
+                value: [{"id": "INC000021095531", "header": "Не проходят оплаты картой", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T09:05:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T09:05:00Z", "priorityId": 4, "priority": "Наивысший", "stateEnum": "Assigned", "stateId": 0, "state": "Assigned", "stateReason": null, "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-21T12:00:00Z", "completionDate": null, "solution": null}, {"id": "INC000021095533", "header": "Замедлены возвраты", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T09:02:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T09:02:00Z", "priorityId": 4, "priority": "Наивысший", "stateEnum": "WorkInProgress", "stateId": 2, "state": "WorkInProgress", "stateReason": null, "assignedGroupName": "Payment Ops", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-21T18:00:00Z", "completionDate": null, "solution": null}]
+              sourceBatchRequest:
+                summary: 'Снимок с INC без срока, P4 в двух группах, Research и второй версией (fixture source-batch-request)'
+                x-fixture: source-batch-request
+                value: [{"id": "INC000021095531", "header": "Не проходят оплаты картой", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T09:05:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T09:05:00Z", "priorityId": 4, "priority": "Наивысший", "stateEnum": "Assigned", "stateId": 0, "state": "Assigned", "stateReason": null, "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-21T12:00:00Z", "completionDate": null, "solution": null}, {"id": "INC000021095532", "header": "Часть заказов не оплачивается через СБП", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T09:01:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T09:01:00Z", "priorityId": 4, "priority": "Наивысший", "stateEnum": "WorkInProgress", "stateId": 2, "state": "WorkInProgress", "stateReason": null, "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "completionDate": null, "solution": null}, {"id": "INC000021095533", "header": "Замедлены возвраты", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T09:02:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T09:02:00Z", "priorityId": 3, "priority": "Высокий", "stateEnum": "WorkInProgress", "stateId": 2, "state": "WorkInProgress", "stateReason": null, "assignedGroupName": "Payment Ops", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-21T18:00:00Z", "completionDate": null, "solution": null}, {"id": "INC000021095534", "header": "Медленная загрузка каталога", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T08:55:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T08:55:00Z", "priorityId": 2, "priority": "Средний", "stateEnum": "Assigned", "stateId": 0, "state": "Assigned", "stateReason": null, "assignedGroupName": "Онлайн-магазин", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-22T09:00:00Z", "completionDate": null, "solution": null}, {"id": "INC000021095539", "header": "Ошибки авторизации в приложении", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-20T15:00:00Z", "lastAssignmentToTeamDateTime": "2026-11-20T15:00:00Z", "priorityId": 3, "priority": "Высокий", "stateEnum": "Research", "stateId": 8, "state": "Research", "stateReason": "решено", "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-20T20:00:00Z", "completionDate": "2026-11-20T19:40:00Z", "solution": "Перезапущен пул соединений БД"}, {"id": "INC000021095537", "header": "Виджет корзины показывал ошибку", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-19T10:00:00Z", "lastAssignmentToTeamDateTime": "2026-11-19T10:00:00Z", "priorityId": 2, "priority": "Средний", "stateEnum": "Closed", "stateId": 10, "state": "Closed", "stateReason": "решено", "assignedGroupName": "Онлайн-магазин", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-19T18:00:00Z", "completionDate": "2026-11-19T16:30:00Z", "solution": "Откатан релиз виджета"}, {"id": "INC000021095538", "header": "Высокий процент отказов платёжного шлюза", "description": "Синтетическое описание для контрактных примеров KAN-20.", "productName": "Оплата заказов", "productMasterId": "BI_pay", "service": "checkout-api", "serviceType": "Клиентский", "scenarioName": "Оформление заказа", "submitDate": "2026-11-21T09:03:00Z", "lastAssignmentToTeamDateTime": "2026-11-21T09:03:00Z", "priorityId": 3, "priority": "Высокий", "stateEnum": "WorkInProgress", "stateId": 2, "state": "WorkInProgress", "stateReason": null, "assignedGroupName": "Оплата", "initiatorLogin": "synthetic.operator", "initiatorName": "Синтетический оператор", "deadline": "2026-11-24T18:00:00Z", "completionDate": null, "solution": null}]
+      responses:
+        '202':
+          description: 'Пакет принят и зафиксирован до ответа. Первый приём и идемпотентный повтор возвращают одинаковые тело и `Location`. '
+          headers:
+            Location:
+              required: true
+              description: Относительный URI метаданных пакета; абсолютный строится от текущего хоста.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItsmBatchAccepted'
+              examples:
+                firstAccept:
+                  summary: Первый приём (fixture ingest-accepted-202)
+                  x-fixture: ingest-accepted-202
+                  value: {"batchId": "3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11"}
+                idempotentReplay:
+                  summary: 'Повтор теми же байтами возвращает тот же batchId'
+                  x-fixture: ingest-accepted-replay-202
+                  value: {"batchId": "3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11"}
+        '400':
+          description: Некорректный вход; ничего не сохраняется.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidIdempotencyKey:
+                  summary: Idempotency-Key не UUID
+                  value: {"code": "ITSM_INVALID_IDEMPOTENCY_KEY", "message": "Idempotency-Key must be a UUID"}
+                invalidSourceId:
+                  summary: Источник не 1–128 видимых ASCII
+                  value: {"code": "ITSM_INVALID_SOURCE_ID", "message": "X-Source-Id must be 1-128 visible ASCII characters"}
+                invalidSourceVersion:
+                  summary: Версия не положительное 64-битное целое
+                  value: {"code": "ITSM_INVALID_SOURCE_VERSION", "message": "X-Source-Version must be a positive 64-bit integer"}
+                invalidPayload:
+                  summary: Тело не одиночный JSON-массив
+                  value: {"code": "ITSM_INVALID_PAYLOAD", "message": "Request body must be a single JSON array"}
+                invalidRecord:
+                  summary: Запись отклонена проверкой KAN-21
+                  value: {"code": "ITSM_INVALID_RECORD", "message": "ITSM record in snapshot at index 0 has invalid field id: must be a string"}
+                duplicateRecord:
+                  summary: Идентификатор INC повторяется в снимке
+                  value: {"code": "ITSM_DUPLICATE_RECORD", "message": "ITSM snapshot contains duplicate id; record at index 1 repeats index 0"}
+        '401':
+          description: 'Нет, просрочен или невалиден машинный Bearer (issuer, подпись JWKS, audience). Ответляет точка входа машинной цепочки.'
+          headers:
+            WWW-Authenticate:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                machineAuthRequired:
+                  summary: Нет или невалиден машинный Bearer
+                  value: {"code": "ITSM_MACHINE_AUTH_REQUIRED", "message": "Machine bearer token is required"}
+        '403':
+          description: 'Токен без машинного `azp` или без права импорта.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                machineAccessDenied:
+                  summary: Токен без машинного azp или права импорта
+                  value: {"code": "ITSM_MACHINE_ACCESS_DENIED", "message": "Machine client identity or itsm import permission is missing"}
+        '409':
+          description: Конфликт ключа или версии; состояние БД не меняется.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                idempotencyConflict:
+                  summary: Ключ переиспользован с другими данными
+                  value: {"code": "ITSM_IDEMPOTENCY_CONFLICT", "message": "Idempotency-Key was already used with different request metadata or payload"}
+                sourceVersionConflict:
+                  summary: Источник и версия уже приняты с другим ключом
+                  value: {"code": "ITSM_SOURCE_VERSION_CONFLICT", "message": "Source version was already accepted with a different idempotency key"}
+        '413':
+          description: 'Тело больше ограничения LoggerFilter (`REQUEST_BODY_TOO_LARGE`).'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                bodyTooLarge:
+                  summary: Тело больше ограничения
+                  value: {"code": "REQUEST_BODY_TOO_LARGE", "message": "Request body exceeds 1048576 bytes"}
+        '415':
+          description: 'Content-Type не `application/json`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                unsupportedMediaType:
+                  summary: Content-Type не application/json
+                  value: {"code": "UNSUPPORTED_MEDIA_TYPE", "message": "Content type is not supported"}
+        '422':
+          description: Снимок отклонён валидатором записей до постановки в очередь. Возможен только если проверка выполняется перед записью; развёрнутая версия KAN-27 этот ответ не возвращает.
+          content:
+            application/problem+json:
+              schema:
+                $ref: '#/components/schemas/ItsmExpectedProblem'
+              examples:
+                invalidRecord:
+                  summary: 'Числовой INC отклонён (не развёрнуто, fixture ingest-problem-invalid-record)'
+                  x-fixture: ingest-problem-invalid-record
+                  value: {"type": "about:blank", "title": "ITSM snapshot was rejected", "status": 422, "code": "ITSM_INVALID_RECORD", "detail": "ITSM record in snapshot at index 0 has invalid field id: must be a string", "instance": "2026-11-21T09:05:00.123456Z"}
+        '429':
+          description: 'Приёмник временно ограничил поток: очередь необработанных пакетов заполнена.'
+          headers:
+            Retry-After:
+              required: false
+              schema:
+                type: integer
+                minimum: 0
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                intakeQueueFull:
+                  summary: Очередь необработанных пакетов заполнена
+                  value: {"code": "ITSM_INTAKE_QUEUE_FULL", "message": "ITSM intake queue is full (1000 outstanding batches)"}
+        '503':
+          description: Приёмник временно недоступен.
+  '/api/integrations/itsm/batches/{batchId}':
+    get:
+      operationId: getItsmBatch
+      summary: Состояние принятого пакета (deployed)
+      description: 'Метаданные пакета без исходного payload. Пока пакет не обработан — `RECEIVED` или `PROCESSING`; после успеха — `SUCCEEDED`, иначе `FAILED` с `diagnostic`. Опубликованную `revision` возвращает `GET /api/snapshot/status`, а не этот маршрут. '
+      security:
+        - machineBearer: []
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          description: 'Значение `Idempotency-Key` принятого пакета.'
+          schema:
+            type: string
+            format: uuid
+          examples:
+            sourceBatch:
+              value: 3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11
+      responses:
+        '200':
+          description: Метаданные пакета.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItsmBatchMetadata'
+              examples:
+                received:
+                  summary: Пакет в очереди (fixture ingest-batch-received-200)
+                  x-fixture: ingest-batch-received-200
+                  value: {"batchId": "3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11", "sourceId": "itcs-prod", "sourceVersion": 42, "receivedAt": "2026-11-21T09:05:00.123456Z", "status": "RECEIVED", "diagnostic": null, "nextAttemptAt": null}
+                receivedAfterRetry:
+                  summary: 'Пакет, для которого назначен повтор (fixture ingest-batch-next-attempt-200)'
+                  x-fixture: ingest-batch-next-attempt-200
+                  value: {"batchId": "5b8e2c4d-1f6a-4d3b-8e27-9c0a1b2d3e4f", "sourceId": "itcs-prod", "sourceVersion": 43, "receivedAt": "2026-11-21T09:05:30.100000Z", "status": "RECEIVED", "diagnostic": null, "nextAttemptAt": "2026-11-21T09:06:00.100000Z"}
+                succeeded:
+                  summary: Опубликованный пакет (fixture ingest-batch-succeeded-200)
+                  x-fixture: ingest-batch-succeeded-200
+                  value: {"batchId": "3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11", "sourceId": "itcs-prod", "sourceVersion": 42, "receivedAt": "2026-11-21T09:05:00.123456Z", "status": "SUCCEEDED", "diagnostic": "applied snapshot revision 42", "nextAttemptAt": null}
+        '401':
+          description: Нет или невалиден машинный Bearer.
+          headers:
+            WWW-Authenticate:
+              required: true
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                machineAuthRequired:
+                  summary: Нет или невалиден машинный Bearer
+                  value: {"code": "ITSM_MACHINE_AUTH_REQUIRED", "message": "Machine bearer token is required"}
+        '403':
+          description: Токен без права импорта.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                machineAccessDenied:
+                  summary: Токен без машинного azp или права импорта
+                  value: {"code": "ITSM_MACHINE_ACCESS_DENIED", "message": "Machine client identity or itsm import permission is missing"}
+        '404':
+          description: Пакет не найден.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                batchNotFound:
+                  summary: Пакет с таким batchId не найден
+                  value: {"code": "ITSM_BATCH_NOT_FOUND", "message": "ITSM batch 9c1f0e5a-8d2b-4a7e-b3c4-5d6e7f809112 not found"}
+  /api/snapshot/status:
+    get:
+      operationId: getSnapshotStatus
+      summary: Опубликованная версия снимка и его свежесть (deployed)
+      description: |
+        Состояние данных для интерфейса и отправителя. Все даты — UTC, ISO-8601 (`Z` или `+00:00`), до микросекунд.
+        - `lastReceivedAt` — приём последнего пакета; `202` не означает публикацию. - `lastSuccessAt` и `revision` — последняя успешная обработка; `null`, пока успеха не было. - `stale` — `true`, пока последний принятый пакет не обработан успешно, или если новых снимков не было дольше `ITSM_INTAKE_STALE_AFTER` (по умолчанию 90 с; при снимке каждые 30 с допускается пропуск до трёх тиков).
+        `revision` — опубликованная версия источника. `eventSeq` — счётчик чтений KAN-7 (`dashboard-api.openapi.yaml`); это не одно и то же.
+      security:
+        - form-or-basic: []
+        - machineBearerProspective: []
+      responses:
+        '200':
+          description: Текущее состояние снимка.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SnapshotStatus'
+              examples:
+                beforeFirstSuccess:
+                  summary: 'Снимок принят, но ещё не опубликован — stale (fixture snapshot-status-stale)'
+                  x-fixture: snapshot-status-stale
+                  value: {"lastReceivedAt": "2026-11-21T09:05:00.123456Z", "lastSuccessAt": null, "revision": null, "stale": true}
+                published:
+                  summary: Опубликован revision 42 (fixture snapshot-status-published)
+                  x-fixture: snapshot-status-published
+                  value: {"lastReceivedAt": "2026-11-21T09:05:00.123456Z", "lastSuccessAt": "2026-11-21T09:05:01.000000Z", "revision": 42, "stale": false}
+                neverReceived:
+                  summary: Снимков ещё не было
+                  value: {"lastReceivedAt": null, "lastSuccessAt": null, "revision": null, "stale": true}
+        '302':
+          description: 'Развёрнутая версия: неаутентифицированный запрос из браузера перенаправляется на форму входа. Machine-клиент получает `401` без формы. '
+          headers:
+            Location:
+              required: true
+              schema:
+                type: string
+          content:
+            text/html:
+              schema:
+                type: string
+              examples:
+                loginForm:
+                  summary: 'HTML формы входа, на которую перенаправляет приложение'
+                  value: '<!DOCTYPE html><html><body><form method="post" action="/login"></form></body></html> '
+        '401':
+          description: 'Нет аутентификации: предлагаемая машинная цепочка отвечает JSON-ошибкой.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                machineAuthRequired:
+                  summary: Нет или невалиден машинный Bearer
+                  value: {"code": "ITSM_MACHINE_AUTH_REQUIRED", "message": "Machine bearer token is required"}
 components:
   securitySchemes:
     machineBearer:
       type: http
       scheme: bearer
+      description: 'JWT машинного клиента Keycloak: проверяются `iss`, подпись JWKS, `exp` и `aud`. Право импорта — `azp` = `ITSM_INTEGRATION_AUTH_CLIENT_ID` и роль `itsm:import` в `realm_access.roles`, `resource_access.<client-id>.roles` или `roles`. Без настроек приёмник отклоняет все токены (fail closed). '
+    form-or-basic:
+      type: http
+      scheme: basic
+      description: 'Развёрнутая цепочка приложения: HTTP Basic и форма входа. В браузере без сессии — `302` на форму; для машинного клиента — `401` при неверных данных. '
+      x-prospective: false
+    machineBearerProspective:
+      type: http
+      scheme: bearer
+      description: 'Предлагается, не развёрнуто: машинная цепочка для `GET /api/snapshot/status` с теми же правилами, что `machineBearer`. '
+      x-prospective: true
+  schemas:
+    IncidentId:
+      type: string
+      description: 'Идентификатор INC всегда строка, даже если похож на число: `INC000021095531`. Внутри снимка уникален; числовой JSON `id` — ошибка.'
+      pattern: '^INC[0-9]{6,18}$'
+    UtcInstant:
+      type: string
+      format: date-time
+      description: 'Момент времени в UTC: ISO-8601 с `Z` или `+00:00`, целые секунды или микросекунды (`2026-11-21T09:05:00Z`). Локальное время без зоны приёмник считает UTC. '
+      pattern: '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,6})?(Z|\+00:00)$'
+      examples:
+        - '2026-11-21T09:05:00Z'
+        - '2026-11-21T09:05:00.123456Z'
+    ItsmIncident:
+      type: object
+      description: 'Запись полного снимка ITCS (`character_problems.json`). Незаявленные поля сохраняются как есть. `deadline` может отсутствовать, быть `null` или техническим `0001-01-01T00:00:00Z` — всё это «без срока». '
+      required:
+        - id
+        - stateEnum
+        - priorityId
+        - submitDate
+      properties:
+        id:
+          $ref: '#/components/schemas/IncidentId'
+        priorityId:
+          type: integer
+          minimum: 0
+          description: '4 — наивысший, 3 — высокий, 2 — средний, 1 — низкий.'
+        stateEnum:
+          type: string
+          enum:
+            - Assigned
+            - WorkInProgress
+            - Resolved
+            - Closed
+            - Research
+          description: 'Активные — `Assigned`, `WorkInProgress`; завершённые — `Resolved`, `Closed`, `Research`. У завершённых обязательны `completionDate` и `solution`; у активных `completionDate` — `null`. '
+          x-completed-states:
+            - Resolved
+            - Closed
+            - Research
+        stateId:
+          type:
+            - integer
+            - 'null'
+          description: 'Числовой статус исходной системы, справочно.'
+        state:
+          type:
+            - string
+            - 'null'
+        submitDate:
+          $ref: '#/components/schemas/UtcInstant'
+        lastAssignmentToTeamDateTime:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+        deadline:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+          description: 'Срок решения; отсутствие, `null` или `0001-01-01T00:00:00Z` — без срока.'
+        completionDate:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+        solution:
+          type:
+            - string
+            - 'null'
+        waitingExitDate:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+        assignedGroupName:
+          type:
+            - string
+            - 'null'
+        productName:
+          type:
+            - string
+            - 'null'
+        serviceType:
+          type:
+            - string
+            - 'null'
+      additionalProperties: true
+    ItsmIncidentSnapshot:
+      type: array
+      description: 'Полный снимок текущей выгрузки, включая неизменившиеся INC; не список изменений. Пустой массив — снимок без записей.'
+      items:
+        $ref: '#/components/schemas/ItsmIncident'
+    ItsmBatchAccepted:
+      type: object
+      required:
+        - batchId
+      properties:
+        batchId:
+          type: string
+          format: uuid
+          description: 'Равен `Idempotency-Key` и последнему сегменту `Location`.'
+      additionalProperties: false
+    ItsmBatchMetadata:
+      type: object
+      required:
+        - batchId
+        - sourceId
+        - sourceVersion
+        - receivedAt
+        - status
+      properties:
+        batchId:
+          type: string
+          format: uuid
+        sourceId:
+          type: string
+        sourceVersion:
+          type: integer
+          minimum: 1
+          description: 'Версия доставки; не `revision` и не `eventSeq`.'
+        receivedAt:
+          $ref: '#/components/schemas/UtcInstant'
+        status:
+          type: string
+          enum:
+            - RECEIVED
+            - PROCESSING
+            - SUCCEEDED
+            - FAILED
+        diagnostic:
+          type:
+            - string
+            - 'null'
+          description: Безопасное описание; без payload и секретов.
+        nextAttemptAt:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+          description: 'Время назначенного повтора; `null` — повтор не назначен.'
+      additionalProperties: false
+    SnapshotStatus:
+      type: object
+      required:
+        - lastReceivedAt
+        - lastSuccessAt
+        - revision
+        - stale
+      properties:
+        lastReceivedAt:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+        lastSuccessAt:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+        revision:
+          type:
+            - integer
+            - 'null'
+          minimum: 1
+          description: 'Опубликованная версия источника; `null` до первой успешной обработки. Растёт только после публикации воркером, а не при `202`. '
+        stale:
+          type: boolean
+          description: '`true`, пока последний принятый снимок не опубликован, или снимков нет дольше `ITSM_INTAKE_STALE_AFTER`. '
+      additionalProperties: false
+    ErrorResponse:
+      type: object
+      required:
+        - code
+        - message
+      description: 'Ошибка REST API (`GlobalExceptionHandler` или сервлет-фильтр); заголовок `X-Request-Id`.'
+      properties:
+        code:
+          type: string
+          minLength: 1
+          pattern: '^[A-Z][A-Z0-9_]*$'
+        message:
+          type: string
+          minLength: 1
+      additionalProperties: false
+    ItsmExpectedProblem:
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - code
+        - detail
+      description: 'Предлагаемая (не развёрнутая) ошибка проверки записей в `application/problem+json` для `422`. Коды — из `AppErrors`. '
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        code:
+          type: string
+          pattern: '^[A-Z][A-Z0-9_]*$'
+        detail:
+          type: string
+        instance:
+          type: string
+      additionalProperties: true
