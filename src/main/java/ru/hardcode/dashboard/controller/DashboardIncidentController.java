@@ -22,9 +22,12 @@ import ru.hardcode.dashboard.dto.DashboardIncidentCardResponse;
 import ru.hardcode.dashboard.dto.DashboardIncidentListResponse;
 import ru.hardcode.dashboard.dto.DashboardIncidentListResponse.Membership;
 import ru.hardcode.dashboard.dto.DashboardSimilarIncidentsResponse;
+import ru.hardcode.dashboard.dto.IncidentChangesPage;
+import ru.hardcode.dashboard.dto.IncidentHistoryResponse;
 import ru.hardcode.dashboard.service.CoordinatorAccessService;
 import ru.hardcode.dashboard.service.DashboardIncidentService;
 import ru.hardcode.dashboard.service.ItsmApiClient;
+import ru.hardcode.dashboard.service.ItsmIncidentChangeQueryService;
 import ru.hardcode.dashboard.service.SimilarIncidentService;
 
 @RestController
@@ -36,13 +39,16 @@ public class DashboardIncidentController {
 	private final DashboardIncidentService service;
 	private final ItsmApiClient itsm;
 	private final CoordinatorAccessService access;
+	private final ItsmIncidentChangeQueryService changes;
 	private final SimilarIncidentService similar;
 
 	public DashboardIncidentController(DashboardIncidentService service, ItsmApiClient itsm,
-			CoordinatorAccessService access, SimilarIncidentService similar) {
+			CoordinatorAccessService access, ItsmIncidentChangeQueryService changes,
+			SimilarIncidentService similar) {
 		this.service = service;
 		this.itsm = itsm;
 		this.access = access;
+		this.changes = changes;
 		this.similar = similar;
 	}
 
@@ -77,6 +83,27 @@ public class DashboardIncidentController {
 			@RequestParam(required = false) String cursor, @RequestParam(defaultValue = "50") int limit) {
 		var page = service.list(groups(request), includeCompleted, cursor, limit);
 		return response(page.etag()).body(page.body());
+	}
+
+	/**
+	 * Polling feed of INC changes by a monotonic event sequence (KAN-28). The cursor is the
+	 * {@code lastEventSeq} of the previous page; events never change identity once committed.
+	 */
+	@GetMapping(path = "/incidents/changes", produces = MediaType.APPLICATION_JSON_VALUE)
+	public ResponseEntity<IncidentChangesPage> incidentChanges(
+			@RequestParam(defaultValue = "0") long afterEventSeq,
+			@RequestParam(defaultValue = "100") int limit) {
+		return ResponseEntity.ok().cacheControl(CacheControl.noStore())
+				.body(changes.changesFeed(afterEventSeq, limit));
+	}
+
+	/**
+	 * The journal of one incident (KAN-28), including added and missing facts. A disappeared
+	 * incident stays readable with the time of its last observation.
+	 */
+	@GetMapping(path = "/incidents/{incidentId}/history", produces = MediaType.APPLICATION_JSON_VALUE)
+	public ResponseEntity<IncidentHistoryResponse> incidentHistory(@PathVariable String incidentId) {
+		return ResponseEntity.ok().cacheControl(CacheControl.noStore()).body(changes.history(incidentId));
 	}
 
 	@GetMapping(path = "/incidents", produces = CSV)

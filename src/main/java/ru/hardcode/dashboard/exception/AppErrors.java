@@ -35,8 +35,11 @@ public enum AppErrors implements AppError {
 	AUTH_REQUIRED("AUTH_REQUIRED", HttpStatus.UNAUTHORIZED, "Authentication is required"),
 	INVALID_GROUP("INVALID_GROUP", HttpStatus.BAD_REQUEST, "Unknown dashboard group ${group}"),
 	INVALID_CURSOR("INVALID_CURSOR", HttpStatus.BAD_REQUEST, "cursor is not a valid list cursor"),
+	// Shared by the KAN-28 incident change feed (afterEventSeq) and the KAN-25 shift queue
+	// (sinceEventSeq): the eventSeq cursor must be a non-negative 64-bit integer.
+	INVALID_EVENT_SEQ("INVALID_EVENT_SEQ", HttpStatus.BAD_REQUEST,
+			"afterEventSeq/sinceEventSeq must be a non-negative 64-bit integer"),
 	INVALID_LIMIT("INVALID_LIMIT", HttpStatus.BAD_REQUEST, "limit must be between 1 and 100"),
-	INVALID_EVENT_SEQ("INVALID_EVENT_SEQ", HttpStatus.BAD_REQUEST, "sinceEventSeq must be a non-negative 64-bit integer"),
 	INVALID_EVENT_LIMIT("INVALID_EVENT_LIMIT", HttpStatus.BAD_REQUEST, "limit must be between 1 and 500"),
 	ACK_EVENTS_INVALID("ACK_EVENTS_INVALID", HttpStatus.BAD_REQUEST,
 			"eventIds must contain 1-1000 unique identifiers like evt-0001"),
