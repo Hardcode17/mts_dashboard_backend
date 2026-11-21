@@ -19,8 +19,12 @@ public final class RenderRealm {
 			{"__DASHBOARD_TEST_USERNAME__", "DASHBOARD_TEST_USERNAME"},
 			{"__DASHBOARD_TEST_EMAIL__", "DASHBOARD_TEST_EMAIL"},
 			{"__DASHBOARD_TEST_PASSWORD__", "DASHBOARD_TEST_PASSWORD"},
-			{"__ITSM_SENDER_CLIENT_SECRET__", "ITSM_SENDER_CLIENT_SECRET"}
+			{"__ITSM_SENDER_CLIENT_SECRET__", "ITSM_SENDER_CLIENT_SECRET"},
+			{"__DASHBOARD_WEB_ORIGIN__", "DASHBOARD_WEB_ORIGIN"}
 	};
+
+	// Published frontend origin for the local flow; the stand deploy always passes the real one explicitly.
+	private static final String DEFAULT_WEB_ORIGIN = "http://localhost:3000";
 
 	public static void main(String[] args) throws IOException {
 		if (args.length != 2) {
@@ -30,7 +34,10 @@ public final class RenderRealm {
 		for (String[] placeholder : PLACEHOLDERS) {
 			String value = System.getenv(placeholder[1]);
 			if (value == null || value.isBlank()) {
-				fail("missing environment variable " + placeholder[1]);
+				if (!"DASHBOARD_WEB_ORIGIN".equals(placeholder[1])) {
+					fail("missing environment variable " + placeholder[1]);
+				}
+				value = DEFAULT_WEB_ORIGIN;
 			}
 			realm = realm.replace(placeholder[0], escape(value));
 		}

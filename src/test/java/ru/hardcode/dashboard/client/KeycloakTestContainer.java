@@ -84,7 +84,8 @@ public class KeycloakTestContainer {
 					.replace("__DASHBOARD_TEST_USERNAME__", TEST_USERNAME)
 					.replace("__DASHBOARD_TEST_EMAIL__", TEST_EMAIL)
 					.replace("__DASHBOARD_TEST_PASSWORD__", TEST_PASSWORD)
-					.replace("__ITSM_SENDER_CLIENT_SECRET__", ITSM_SENDER_SECRET);
+					.replace("__ITSM_SENDER_CLIENT_SECRET__", ITSM_SENDER_SECRET)
+					.replace("__DASHBOARD_WEB_ORIGIN__", "http://localhost:3000");
 		} catch (IOException exception) {
 			throw new UncheckedIOException(exception);
 		}

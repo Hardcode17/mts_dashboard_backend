@@ -99,15 +99,17 @@
       "serviceAccountsEnabled": false,
       "redirectUris": [
         "http://localhost:3000/*",
-        "http://localhost:5173/*"
+        "http://localhost:5173/*",
+        "__DASHBOARD_WEB_ORIGIN__/*"
       ],
       "webOrigins": [
         "http://localhost:3000",
-        "http://localhost:5173"
+        "http://localhost:5173",
+        "__DASHBOARD_WEB_ORIGIN__"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://localhost:3000/*"
+        "post.logout.redirect.uris": "http://localhost:3000/* __DASHBOARD_WEB_ORIGIN__/*"
       },
       "protocolMappers": [
         {

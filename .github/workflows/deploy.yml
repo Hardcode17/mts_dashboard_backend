@@ -21,6 +21,8 @@ jobs:
       COMPOSE_PROJECT_NAME: mts-dashboard-backend
       BACKEND_PORT: ${{ vars.BACKEND_PORT || '8081' }}
       BACKEND_ENV_FILE: ${{ vars.BACKEND_ENV_FILE || '/home/gha-runner/.config/mts-dashboard-backend/runtime.env' }}
+      STAND_KEYCLOAK_URL: ${{ vars.STAND_KEYCLOAK_URL }}
+      STAND_FRONTEND_URL: ${{ vars.STAND_FRONTEND_URL }}
     defaults:
       run:
         shell: bash
@@ -42,12 +44,38 @@ jobs:
         run: docker compose --env-file "$BACKEND_ENV_FILE" build --pull backend
 
       - name: Deploy and wait for healthcheck
-        run: docker compose --env-file "$BACKEND_ENV_FILE" up -d --no-build --wait --wait-timeout 240 backend
+        run: docker compose --env-file "$BACKEND_ENV_FILE" up -d --no-build --wait --wait-timeout 300 backend keycloak
 
       - name: Verify database sample
         run: |
           count=$(docker compose --env-file "$BACKEND_ENV_FILE" exec -T postgres psql -U dashboard -d dashboard -Atc 'SELECT count(*) FROM deployment_sample')
           test "$count" -ge 3
+
+      - name: Grant stand coordinator admission
+        run: |
+          issuer="${STAND_KEYCLOAK_URL%/}/realms/dashboard"
+          admin_username=$(sed -n 's/^KEYCLOAK_ADMIN_USERNAME=//p' "$BACKEND_ENV_FILE")
+          admin_password=$(sed -n 's/^KEYCLOAK_ADMIN_PASSWORD=//p' "$BACKEND_ENV_FILE")
+          admin_token=$(python3 -c 'import json,sys,urllib.parse,urllib.request
+base = sys.argv[1].rstrip("/")
+data = urllib.parse.urlencode({"client_id": "admin-cli", "username": sys.argv[2], "password": sys.argv[3], "grant_type": "password"}).encode()
+request = urllib.request.Request(base + "/realms/master/protocol/openid-connect/token", data=data)
+print(json.load(urllib.request.urlopen(request, timeout=30))["access_token"])' \
+            "$STAND_KEYCLOAK_URL" "$admin_username" "$admin_password")
+          subject=$(python3 -c 'import json,sys,urllib.request
+base = sys.argv[1].rstrip("/")
+request = urllib.request.Request(base + "/admin/realms/dashboard/users?username=coordinator&exact=true", headers={"Authorization": "Bearer " + sys.argv[2]})
+users = json.load(urllib.request.urlopen(request, timeout=30))
+if not users:
+    sys.exit("coordinator user not found in the imported realm")
+print(users[0]["id"])' \
+            "$STAND_KEYCLOAK_URL" "$admin_token")
+          docker compose --env-file "$BACKEND_ENV_FILE" exec -T postgres \
+            psql -U dashboard -d dashboard \
+            -v issuer="$issuer" -v subject="$subject" \
+            -v login=coordinator -v display_name='Координатор' \
+            -f - < scripts/grant-coordinator.sql
+          echo "Admitted coordinator (sub=$subject) for $issuer"
 
       - name: Show deployment status
         run: docker compose --env-file "$BACKEND_ENV_FILE" ps
@@ -56,4 +84,4 @@ jobs:
         if: failure()
         run: |
           docker compose --env-file "$BACKEND_ENV_FILE" ps -a
-          docker compose --env-file "$BACKEND_ENV_FILE" logs --tail 100 backend postgres
+          docker compose --env-file "$BACKEND_ENV_FILE" logs --tail 100 backend postgres keycloak

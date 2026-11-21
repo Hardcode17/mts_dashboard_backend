@@ -149,7 +149,8 @@ sh ./gradlew :itsm-mock:test :itsm-mock:bootJar
 `compose.auth.yaml` поднимает отдельный стенд. Укажите `AUTH_REALM_FILE` вне
 репозитория и передайте через окружение `DASHBOARD_TEST_USERNAME`,
 `DASHBOARD_TEST_EMAIL`, `DASHBOARD_TEST_PASSWORD` и `ITSM_SENDER_CLIENT_SECRET`.
-Подготовьте realm на Java 21 и запустите стенд:
+Origin фронтенда для redirect URI по умолчанию `http://localhost:3000`
+(`DASHBOARD_WEB_ORIGIN` при другом адресе). Подготовьте realm на Java 21 и запустите стенд:
 
 ```sh
 umask 077
@@ -179,3 +180,25 @@ unset token
 `ITSM_INTEGRATION_AUTH_ISSUER`, `ITSM_INTEGRATION_AUTH_JWK_SET_URI`,
 `ITSM_INTEGRATION_AUTH_AUDIENCE=itsm-ingest` и `ITSM_INTEGRATION_AUTH_CLIENT_ID=itsm-sender`.
 Секрет отправителя нужен самому отправителю, бэкенд проверяет токен по публичным ключам.
+
+## Стендовый Keycloak в продакшен-деплое
+
+`compose.yaml` бэкенда включает сервис `keycloak` (порт 8084 наружу, браузер должен
+его достигать). Для деплоя задайте переменные репозитория в
+Settings → Secrets and variables → Actions → Variables:
+
+- `STAND_KEYCLOAK_URL` — origin Keycloak, доступный из браузера, без слэша в конце
+  (например `http://192.168.0.10:8084`);
+- `STAND_FRONTEND_URL` — опубликованный origin фронтенда
+  (например `http://192.168.0.10:8080`).
+
+`scripts/prepare-runtime.sh` рендерит realm через `scripts/render-realm.py`: пользователь
+`coordinator` с паролем из `STAND_COORDINATOR_PASSWORD` runtime-файла, redirect URI
+публичного фронтенда и сгенерированный секрет `itsm-sender`. Issuer
+`STAND_KEYCLOAK_URL/realms/dashboard` попадает в `APP_AUTH_HUMAN_ISSUER` бэкенда и
+должен быть значением `FRONTEND_OIDC_AUTHORITY` в репозитории фронтенда.
+
+После деплоя workflow сам выдаёт координатору локальный допуск через
+`scripts/grant-coordinator.sql`, беря `sub` пользователя у admin API Keycloak. Realm
+импортируется один раз в h2-том: после правки шаблона удалите том
+`mts-dashboard-backend_keycloak-data` и повторите деплой.
