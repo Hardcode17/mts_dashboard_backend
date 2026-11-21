@@ -30,6 +30,17 @@
       "matchedRule": "priorityId = 4"
     }
   ],
+  "deadlineRisk": {
+    "risk": "unknown",
+    "evaluatedAt": "2026-11-21T10:00:00Z",
+    "reasons": [
+      {
+        "code": "no_deadline",
+        "text": "У инцидента нет дедлайна — риск не оценивается"
+      }
+    ],
+    "score": null
+  },
   "eventSeq": 43,
   "revision": 42
 }

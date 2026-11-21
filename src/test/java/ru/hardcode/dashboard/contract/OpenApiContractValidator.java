@@ -50,7 +50,7 @@ final class OpenApiContractValidator {
 			"snapshot-status-stale", "snapshot-status-published", "ingest-batch-invalid-200",
 			"list-default", "list-critical", "list-empty-group", "list-before-first-success",
 			"card-without-deadline", "card-research", "card-completed", "card-before-first-success",
-			"card-not-found", "sources-published", "sources-stale", "events-poll-two-events",
+			"card-not-found", "card-deadline-risk", "sources-published", "sources-stale", "events-poll-two-events",
 			"events-heartbeat", "events-ack-request", "events-ack-response");
 
 	private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
