@@ -38,10 +38,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * KAN-39 acceptance through the standard MCP Streamable HTTP transport (MCP Java SDK client,
  * {@code POST /mcp/evidence}) on the real Spring Boot chain, MockMvc as the HTTP layer and
- * Testcontainers PostgreSQL 17 for the worker and the stand diagnostics table. The stand ITSM
+ * Testcontainers PostgreSQL 17 for intake and the stand diagnostics table. The stand ITSM
  * and log sources are controlled local HTTP sources whose records the tests change directly.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT)
+// Keep intake observable without the independent publisher changing its state during MCP reads.
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT, properties = "itsm.worker.enabled=false")
 @AutoConfigureMockMvc
 class McpEvidenceIT extends McpEvidenceSupport {
 

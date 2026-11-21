@@ -28,8 +28,8 @@ import ru.hardcode.dashboard.client.McpEvidenceStandSources;
  * rules are deterministic.
  *
  * <p>The stand diagnostics table is created once the container is running. Spring's container
- * lifecycle starts it and registers the connection properties before any test class, so the
- * table is prepared in a {@link TestExecutionListener} before the first test method.
+ * lifecycle starts it when the context loads. A {@link TestExecutionListener} prepares the
+ * table before the first test method, after loading that context.
  */
 @ActiveProfiles({"demo", "evidence"})
 @Import({
@@ -122,7 +122,8 @@ public abstract class McpEvidenceSupport {
 		private static McpEvidenceDemoDiagnostics prepared;
 
 		@Override
-		public void beforeTestClass(TestContext testContext) {
+		public void prepareTestInstance(TestContext testContext) {
+			testContext.getApplicationContext();
 			if (prepared != null) {
 				return;
 			}
