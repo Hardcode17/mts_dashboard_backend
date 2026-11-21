@@ -14,6 +14,7 @@ import ru.hardcode.dashboard.repository.DeadlineRiskRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
+import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -94,7 +95,7 @@ class DeadlineRiskIT extends DashboardIncidentTestSupport {
 				.andExpect(jsonPath("$.deadlineRisk.risk").value("unknown"))
 				.andExpect(jsonPath("$.deadlineRisk.reasons[0].code").value("no_history"))
 				.andExpect(jsonPath("$.deadlineRisk.reasons[0].text", containsString("Support")))
-				.andExpect(jsonPath("$.deadlineRisk.score").value(null));
+				.andExpect(jsonPath("$.deadlineRisk.score").value(nullValue()));
 
 		publish(receive(2, "[" + String.join(",",
 				completed("INC0000100004", "2026-11-20T08:00:00Z", "2026-11-20T10:00:00Z"),
@@ -120,12 +121,12 @@ class DeadlineRiskIT extends DashboardIncidentTestSupport {
 				.andExpect(jsonPath("$.deadlineRisk.reasons[0].code").value("no_deadline"))
 				.andExpect(jsonPath("$.deadlineRisk.reasons[0].text")
 						.value("У инцидента нет дедлайна — риск не оценивается"))
-				.andExpect(jsonPath("$.deadlineRisk.score").value(null));
+				.andExpect(jsonPath("$.deadlineRisk.score").value(nullValue()));
 		mvc.perform(authenticatedGet(PATH + "/{id}", "INC0000100006"))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.deadlineRisk.risk").value("unknown"))
 				.andExpect(jsonPath("$.deadlineRisk.reasons[0].code").value("not_active"))
-				.andExpect(jsonPath("$.deadlineRisk.score").value(null));
+				.andExpect(jsonPath("$.deadlineRisk.score").value(nullValue()));
 	}
 
 	private static String active(String id, String deadline) {
