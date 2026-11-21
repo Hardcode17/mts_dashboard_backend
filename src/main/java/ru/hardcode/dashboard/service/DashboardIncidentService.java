@@ -34,6 +34,7 @@ import ru.hardcode.dashboard.exception.DashboardIncidentNotFoundException;
 import ru.hardcode.dashboard.repository.DashboardIncidentRepository;
 import ru.hardcode.dashboard.repository.DashboardIncidentRepository.IncidentRow;
 import ru.hardcode.dashboard.repository.ItsmBaselineRepository;
+import ru.hardcode.dashboard.service.deadlinerisk.DeadlineRiskService;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import ru.hardcode.dashboard.repository.DashboardIncidentRepository.RelationshipNode;
@@ -43,7 +44,6 @@ public class DashboardIncidentService {
 
 	private static final Pattern INCIDENT_ID = Pattern.compile("INC[0-9]{6,18}");
 	private static final TypeReference<Map<String, Object>> ROW = new TypeReference<>() {};
-	private static final String COORDINATORS = "КЦ ИТ Координаторы Массовых Инцидентов";
 	private static final Comparator<IncidentRow> INCIDENT_ORDER =
 			Comparator.comparing(DashboardIncidentService::updatedAt).reversed()
 					.thenComparing(row -> row.summary().id());
@@ -57,10 +57,11 @@ public class DashboardIncidentService {
 	private final ItsmBaselineRepository domain;
 	private final ItsmIncidentSnapshotParser parser;
 	private final ItsmSnapshotMapper mapper;
+	private final DeadlineRiskService deadlineRisk;
 
 	public DashboardIncidentService(DashboardIncidentRepository repository, DashboardItsmLink itsmLink, Clock clock,
 			JdbcTemplate db, ObjectMapper json, ItsmApiClient itsm, ItsmBaselineRepository domain,
-			ItsmIncidentSnapshotParser parser, ItsmSnapshotMapper mapper) {
+			ItsmIncidentSnapshotParser parser, ItsmSnapshotMapper mapper, DeadlineRiskService deadlineRisk) {
 		this.repository = repository;
 		this.itsmLink = itsmLink;
 		this.clock = clock;
@@ -70,6 +71,7 @@ public class DashboardIncidentService {
 		this.domain = domain;
 		this.parser = parser;
 		this.mapper = mapper;
+		this.deadlineRisk = deadlineRisk;
 	}
 
 	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -93,7 +95,7 @@ public class DashboardIncidentService {
 				card.lastAssignmentToTeamDateTime(), incident.deadline(), incident.completionDate(), card.solution(),
 				remaining == null ? null : remaining.getSeconds(), remaining != null && remaining.isNegative(),
 				itsmLink.forIncident(incident.id()), itsmLink.demo(), DashboardIncidentGroup.memberships(incident),
-				published.eventSeq(), published.revision());
+				deadlineRisk.cardRisk(incident, clock.instant()), published.eventSeq(), published.revision());
 	}
 
 	/**
@@ -200,15 +202,6 @@ public class DashboardIncidentService {
 			db.update("UPDATE itsm_snapshot_source SET change_revision=? WHERE source_id=?", revision, before.source());
 			db.update("UPDATE dashboard_publication SET revision=?,event_seq=event_seq+1 WHERE singleton",
 					revision);
-			// Once an incident leaves the coordinators' queue, its open internal task is completed.
-			boolean handedOff = !COORDINATORS.equals(row.get("assignedGroupName"))
-					|| (changes.containsKey("assignedEmployeeLogin") && row.get("assignedEmployeeLogin") != null);
-			if (handedOff) {
-				db.update("""
-						UPDATE coordination_tasks SET status='completed',finished_at=now(),updated_at=now()
-						WHERE incident_id=? AND status='open'
-						""", incidentId);
-			}
 		}
 		return card(incidentId);
 	}

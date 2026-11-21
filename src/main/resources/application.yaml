@@ -32,6 +32,54 @@ dashboard:
     connect-timeout: ${DASHBOARD_ITSM_CONNECT_TIMEOUT:PT2S}
     read-timeout: ${DASHBOARD_ITSM_READ_TIMEOUT:PT5S}
 
+deadline-risk:
+  # KAN-82 model constants. Product decision: the feature-aware regression is the DEFAULT mode —
+  # the team deliberately prefers the smart forecast (reassignments, stuck cards, assignee load,
+  # group history) even though the plain threshold is marginally sharper on the UCI test
+  # (F1 0.778 vs 0.769); the weights are retrained on real MTS history by the KAN-81 script.
+  # The plain remaining-time threshold stays the simple fallback mode.
+  mode: regression
+  # Fallback mode (deadline-risk.mode: threshold): high when less than this many hours remain
+  # until the deadline. Calibrated on UCI ServiceNow (KAN-81 baseline A, N = 32.92); recompute
+  # on real MTS history.
+  threshold-hours: 32.92
+  # Fallback mode: medium inside the (threshold, buffer) zone, low above it. Default 2*N.
+  buffer-hours: 65.84
+  regression:
+    # Default mode (deadline-risk.mode: regression): KAN-81 logistic regression without
+    # standardization, reproduced from tools/deadline_risk_weights.json.
+    weights:
+      w0: 4.379061
+      w1: 0.010472
+      w2: 0.167612
+      w3: -0.030004
+      w4: 0.42397
+      w5: 0.033348
+      w6: 0.007605
+      w7: -2.089877
+    # Category boundaries on the raw score, tuned on train for a ~20% false-positive budget.
+    thresholds:
+      medium: -1.286237
+      high: -0.913755
+    # Feature bounds fixed by the offline notebook; the scorer clamps every feature to them.
+    clamps:
+      x1: {min: 0.0, max: 100.0}
+      x2: {min: 0.0, max: 200.0}
+      x3: {min: 0.0, max: 50.0}
+      x4: {min: 0.0, max: 20.0}
+      x5: {min: 0.0, max: 2160.0}
+      x6: {min: 0.0, max: 100.0}
+      x7: {min: 1.0, max: 4.0}
+    # Floor for the deadline remainder in x1 so a passed deadline cannot divide by zero.
+    min-remaining-hours: 0.25
+    # Training medians by UCI priority (1 = critical, 4 = low), used until local history exists.
+    priority-medians-hours: [52.8917, 67.7833, 27.0667, 30.4]
+  # When a feature becomes a named reason of the assessment.
+  reasons:
+    stale-status-hours: 24
+    assignee-open-threshold: 5
+
+
 coordinator:
   access:
     user-client-ids: ${COORDINATOR_USER_CLIENT_IDS:dashboard-web}

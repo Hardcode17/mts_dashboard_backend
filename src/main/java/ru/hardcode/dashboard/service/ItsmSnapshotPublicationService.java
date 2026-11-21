@@ -51,6 +51,7 @@ public class ItsmSnapshotPublicationService implements ItsmBatchProcessor {
 	private final ObjectMapper objectMapper;
 	private final ApplicationEventPublisher events;
 	private final DashboardMonitoringService monitoring;
+	private final CoordinationTaskService coordinationTasks;
 	private final Clock clock;
 
 	public ItsmSnapshotPublicationService(ItsmIncidentSnapshotParser parser,
@@ -58,6 +59,7 @@ public class ItsmSnapshotPublicationService implements ItsmBatchProcessor {
 			ItsmSnapshotPublicationRepository repository, ItsmBatchSqlRepository batches,
 			ItsmBaselineRepository domain, ItsmSnapshotMapper mapper,
 			ObjectMapper objectMapper, ApplicationEventPublisher events, DashboardMonitoringService monitoring,
+			CoordinationTaskService coordinationTasks,
 			Clock clock) {
 		this.parser = parser;
 		this.hierarchyResolver = hierarchyResolver;
@@ -68,6 +70,7 @@ public class ItsmSnapshotPublicationService implements ItsmBatchProcessor {
 		this.objectMapper = objectMapper;
 		this.events = events;
 		this.monitoring = monitoring;
+		this.coordinationTasks = coordinationTasks;
 		this.clock = clock;
 	}
 
@@ -152,6 +155,8 @@ public class ItsmSnapshotPublicationService implements ItsmBatchProcessor {
 				.sorted(Comparator.comparing(ItsmIncidentRecord::id)).toList();
 		var mapping = mapper.map(new ItsmIncidentSnapshot(changedRecords));
 		domain.upsertDomain(mapping, work.sourceId(), present, missing);
+		coordinationTasks.observeHandoffs(work.sourceId(), work.sourceVersion(), snapshot, clock.instant(),
+				head.observedVersion() == null ? null : changes.isEmpty() ? -1L : revision);
 		domain.replaceImportedHierarchy(work.sourceId(), hierarchy.linksByChildId());
 		repository.updateObservation(work.sourceId(), work.sourceVersion(), revision, snapshot);
 		Instant appliedAt = clock.instant();
