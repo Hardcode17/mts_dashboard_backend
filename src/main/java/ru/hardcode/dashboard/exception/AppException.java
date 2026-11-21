@@ -21,6 +21,11 @@ public class AppException extends RuntimeException {
 		this.appError = appError;
 	}
 
+	public AppException(AppError appError, Map<String, ?> parameters, Throwable cause) {
+		super(formatMessage(appError.getMessage(), parameters), cause);
+		this.appError = appError;
+	}
+
 	public AppError getAppError() {
 		return appError;
 	}
