@@ -3,6 +3,8 @@ package ru.hardcode.itsmmock;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.time.Clock;
+import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
@@ -31,8 +33,10 @@ final class SnapshotSender {
         this.store = new SnapshotStore(settings.stateFile(), json);
         this.state = store.read(settings.sourceId());
         this.generator = new IncidentGenerator(settings.seed(), settings.batchSize());
-        if (state.rows().isEmpty() && state.deliveredVersion() == 0 && state.pending() == null) {
-            var initial = settings.fixtureFile() == null ? generator.next(List.of(), 1, clock.instant()) : readFixture();
+        if (settings.fixtureFile() != null) {
+            addMissingFixtureIncidents();
+        } else if (state.rows().isEmpty() && state.deliveredVersion() == 0 && state.pending() == null) {
+            var initial = generator.next(List.of(), 1, clock.instant());
             persist(new SnapshotStore.State(state.sourceId(), 0, initial, null, null, java.util.Set.of()));
         }
         updateStatus(state.rejection());
@@ -102,6 +106,22 @@ final class SnapshotSender {
             throw new IOException("Fixture must contain a JSON array of incident records with string IDs");
         }
         return rows;
+    }
+
+    private void addMissingFixtureIncidents() throws IOException {
+        var rows = new ArrayList<>(state.rows());
+        var ids = new HashSet<>();
+        rows.forEach(row -> ids.add(row.get("id")));
+        for (var row : readFixture()) {
+            if (ids.add(row.get("id"))) {
+                rows.add(row);
+            }
+        }
+        if (rows.size() != state.rows().size()) {
+            // Existing edits and any batch already sent for this version must be preserved.
+            persist(new SnapshotStore.State(state.sourceId(), state.deliveredVersion(), rows,
+                    state.pending(), state.rejection(), state.manualStates()));
+        }
     }
 
     private void persist(SnapshotStore.State next) throws IOException {

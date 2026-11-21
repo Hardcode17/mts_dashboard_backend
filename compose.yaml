@@ -80,6 +80,33 @@ services:
       retries: 40
       start_period: 60s
 
+  frontend:
+    profiles: [frontend]
+    build:
+      context: ${STAND_FRONTEND_CONTEXT:-.}
+      args:
+        VITE_OIDC_AUTHORITY: ${STAND_OIDC_AUTHORITY:-}
+      labels:
+        org.opencontainers.image.revision: ${STAND_FRONTEND_REVISION:-local}
+    ports:
+      - "${FRONTEND_PORT:-8080}:3000"
+    environment:
+      BACKEND_URL: http://backend:8080
+      KEYCLOAK_URL: http://keycloak:8080
+      OIDC_AUTHORITY: ${STAND_OIDC_AUTHORITY:-}
+      ITSM_MOCK_URL: ${STAND_ITSM_PAGE_URL:-}
+      MCC_STATE_DIR: /var/lib/mcc
+      MCC_GROUP_MODEL: ${MCC_GROUP_MODEL:-}
+      MCC_OLLAMA_URL: ${MCC_OLLAMA_URL:-http://127.0.0.1:11434}
+    volumes:
+      - workspace-data:/var/lib/mcc
+    depends_on:
+      backend:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    restart: unless-stopped
+
   itsm-mock:
     profiles: [itsm-mock]
     build:
@@ -101,6 +128,12 @@ services:
       ITSM_MOCK_FIXTURE_FILE: ${ITSM_MOCK_FIXTURE_FILE:-}
     volumes:
       - itsm-mock-data:/var/lib/itsm-mock
+      - type: bind
+        source: ${STAND_FIXTURE_DIR:-./deploy/fixtures}
+        target: /fixtures
+        read_only: true
+        bind:
+          create_host_path: false
     ports:
       - "127.0.0.1:${ITSM_MOCK_PORT:-8082}:8080"
     depends_on:
@@ -114,3 +147,6 @@ volumes:
   postgres-data:
   keycloak-data:
   itsm-mock-data:
+  workspace-data:
+    external: true
+    name: ${STAND_WORKSPACE_VOLUME:-mts-dashboard-front_workspace-data}

@@ -1,5 +1,6 @@
 .git
 .github
+.stand-sources
 .gradle
 build
 logs

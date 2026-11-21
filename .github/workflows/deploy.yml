@@ -16,7 +16,7 @@ jobs:
   deploy:
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, Linux, ARM64, pi-web]
-    timeout-minutes: 30
+    timeout-minutes: 45
     env:
       COMPOSE_PROJECT_NAME: mts-dashboard-backend
       BACKEND_PORT: ${{ vars.BACKEND_PORT || '8081' }}
@@ -24,6 +24,9 @@ jobs:
       STAND_KEYCLOAK_URL: ${{ vars.STAND_KEYCLOAK_URL }}
       STAND_FRONTEND_URL: ${{ vars.STAND_FRONTEND_URL }}
       STAND_ENABLE_ITSM_MOCK: ${{ vars.STAND_ENABLE_ITSM_MOCK || 'false' }}
+      FRONTEND_PORT: ${{ vars.FRONTEND_PORT || '8080' }}
+      MCC_GROUP_MODEL: ${{ vars.MCC_GROUP_MODEL }}
+      MCC_OLLAMA_URL: ${{ vars.MCC_OLLAMA_URL }}
     defaults:
       run:
         shell: bash
@@ -33,12 +36,33 @@ jobs:
         with:
           persist-credentials: false
 
+      - name: Checkout frontend
+        uses: actions/checkout@v6
+        with:
+          repository: Hardcode17/mts_dashboard_front
+          ref: ${{ vars.STAND_FRONTEND_REF || 'main' }}
+          path: .stand-sources/frontend
+          persist-credentials: false
+
+      - name: Checkout ITSM fixture source
+        if: env.STAND_ENABLE_ITSM_MOCK == 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: Hardcode17/mts_dashboard_data
+          ref: ${{ vars.STAND_DATA_REF || 'main' }}
+          path: .stand-sources/data
+          persist-credentials: false
+
+      - name: Prepare frontend and fixture configuration
+        run: bash scripts/prepare-stand-sources.sh
+
       - name: Check source and runtime configuration
         run: |
           test -f gradlew || { echo 'Merge the backend source into main before deploying.'; exit 1; }
           bash scripts/prepare-runtime.sh
           docker info
           docker compose --env-file "$BACKEND_ENV_FILE" version
+          docker volume create "${STAND_WORKSPACE_VOLUME:-mts-dashboard-front_workspace-data}" >/dev/null
           docker compose --env-file "$BACKEND_ENV_FILE" config --quiet
 
       - name: Build backend
@@ -67,6 +91,13 @@ jobs:
         if: env.STAND_ENABLE_ITSM_MOCK == 'true'
         run: bash scripts/deploy-stand-itsm.sh
 
+      - name: Stop stand ITSM mock when disabled
+        if: env.STAND_ENABLE_ITSM_MOCK == 'false'
+        run: docker compose --env-file "$BACKEND_ENV_FILE" --profile itsm-mock stop itsm-mock
+
+      - name: Deploy frontend and verify the unified stand
+        run: bash scripts/deploy-stand-frontend.sh
+
       - name: Show deployment status
         run: docker compose --env-file "$BACKEND_ENV_FILE" ps
 
@@ -75,3 +106,7 @@ jobs:
         run: |
           docker compose --env-file "$BACKEND_ENV_FILE" ps -a
           docker compose --env-file "$BACKEND_ENV_FILE" logs --tail 100 backend postgres keycloak
+          docker compose --env-file "$BACKEND_ENV_FILE" --profile frontend logs --tail 100 frontend
+          if [[ "$STAND_ENABLE_ITSM_MOCK" == true ]]; then
+            docker compose --env-file "$BACKEND_ENV_FILE" --profile itsm-mock logs --tail 100 itsm-mock
+          fi
