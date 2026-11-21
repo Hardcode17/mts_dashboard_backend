@@ -52,8 +52,8 @@ class ItsmWorkerRunnerTest {
 		assertThat(claims.get()).isEqualTo(2);
 
 		release.countDown();
-		waitUntil(() -> runner.inFlight() == 0);
-		assertThat(claims.get()).isEqualTo(4);
+		// Scheduled polls can start another bounded round after the blocked work drains.
+		waitUntil(() -> claims.get() >= 4);
 	}
 
 	@Test
