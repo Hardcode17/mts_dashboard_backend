@@ -673,6 +673,7 @@ paths:
                     remainingSeconds: 86400
                     overdue: false
                     itsmUrl: 'http://127.0.0.1:8082/itsm_incident/INC000021931151/page'
+                    meetingUrl: null
                     itsmDemo: true
                     groupMemberships: []
                     eventSeq: 2
@@ -802,6 +803,7 @@ paths:
                     remainingSeconds: null
                     overdue: false
                     itsmUrl: 'http://127.0.0.1:8082/api/mock/incidents/INC000021095532'
+                    meetingUrl: null
                     itsmDemo: true
                     groupMemberships:
                       - group: coordinator
@@ -834,6 +836,7 @@ paths:
                     remainingSeconds: null
                     overdue: false
                     itsmUrl: 'http://127.0.0.1:8082/api/mock/incidents/INC000021095539'
+                    meetingUrl: null
                     itsmDemo: true
                     groupMemberships:
                       - group: coordinator
@@ -866,6 +869,7 @@ paths:
                     remainingSeconds: null
                     overdue: false
                     itsmUrl: 'http://127.0.0.1:8082/api/mock/incidents/INC000021095537'
+                    meetingUrl: null
                     itsmDemo: true
                     groupMemberships: []
                     eventSeq: 43
@@ -913,6 +917,76 @@ paths:
                     message: Incident not found
                     eventSeq: 0
                     revision: 0
+  '/api/incidents/{id}/meeting-link':
+    put:
+      operationId: saveMeetingLink
+      summary: Сохранить или заменить ссылку МТС Линк (KAN-37)
+      description: |
+        Локальная ссылка возвращается полем meetingUrl в GET /api/dashboard/incidents/{incidentId}.
+        Обновление сохраняет остальные ссылки инцидента, повторный импорт ITSM сохраняет локальную ссылку.
+        Допускается абсолютный HTTP(S) URL с хостом, без логина и пароля в адресе.
+      security: [{coordinatorBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {$ref: '#/components/schemas/IncidentId'}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [meetingUrl]
+              additionalProperties: false
+              properties:
+                meetingUrl: {type: string, format: uri, pattern: '^https?://'}
+            examples:
+              meeting:
+                summary: Ссылка на встречу
+                value: {meetingUrl: 'https://link.example.test/meeting/42'}
+      responses:
+        '204':
+          description: Ссылка сохранена.
+        '400':
+          description: Неверный номер INC, формат запроса или URL.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                invalidLink:
+                  summary: Неподдерживаемая ссылка
+                  value: {code: INVALID_MEETING_LINK, message: meetingUrl must be an absolute HTTP or HTTPS URL without embedded credentials}
+                invalidId:
+                  summary: Неверный формат номера
+                  value: {code: INVALID_INCIDENT_ID, message: incidentId must be an INC identifier such as INC000021095531}
+                malformedJson:
+                  summary: Некорректный JSON
+                  value: {code: INVALID_REQUEST_BODY, message: Request body is malformed or missing}
+        '401':
+          description: Нет действительного Bearer JWT.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                missingToken:
+                  summary: Нет токена координатора
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Пользователь не допущен к рабочему месту координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                noAccess:
+                  summary: Нет локального допуска
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+        '404':
+          description: INC отсутствует в опубликованных данных.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentNotFound'}
+              examples:
+                missingIncident:
+                  summary: Инцидент не найден
+                  value: {code: INCIDENT_NOT_FOUND, message: Incident INC000021095531 not found, eventSeq: 43, revision: 42}
   /api/dashboard/sources:
     get:
       operationId: listSources
@@ -1287,10 +1361,16 @@ components:
         - overdue
         - itsmUrl
         - itsmDemo
+        - meetingUrl
         - groupMemberships
         - eventSeq
         - revision
       properties:
+        meetingUrl:
+          type: [string, 'null']
+          format: uri
+          pattern: '^https?://'
+          description: Локальная ссылка МТС Линк или null, если её ещё не сохранили.
         itsmUrl: {type: string, format: uri}
         remainingSeconds: {type: [integer, 'null']}
         overdue: {type: boolean}

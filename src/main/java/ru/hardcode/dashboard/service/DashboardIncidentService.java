@@ -1,5 +1,7 @@
 package ru.hardcode.dashboard.service;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -68,9 +70,7 @@ public class DashboardIncidentService {
 
 	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 	public DashboardIncidentCardResponse card(String incidentId) {
-		if (!INCIDENT_ID.matcher(incidentId).matches()) {
-			throw new AppException(AppErrors.INVALID_INCIDENT_ID);
-		}
+		validateIncidentId(incidentId);
 		var published = repository.publication();
 		if (published.eventSeq() == 0) {
 			throw new DashboardIncidentNotFoundException(incidentId, 0, 0);
@@ -86,8 +86,37 @@ public class DashboardIncidentService {
 				incident.priorityId(), incident.submitDate(),
 				card.lastAssignmentToTeamDateTime(), incident.deadline(), incident.completionDate(), card.solution(),
 				remaining == null ? null : remaining.getSeconds(), remaining != null && remaining.isNegative(),
-				itsmLink.forIncident(incident.id()), itsmLink.demo(), DashboardIncidentGroup.memberships(incident),
+				itsmLink.forIncident(incident.id()), itsmLink.demo(), card.meetingUrl(),
+				DashboardIncidentGroup.memberships(incident),
 				published.eventSeq(), published.revision());
+	}
+
+	@Transactional
+	public void saveMeetingLink(String incidentId, String meetingUrl) {
+		validateIncidentId(incidentId);
+		validateMeetingUrl(meetingUrl);
+		if (!repository.saveMeetingLink(incidentId, meetingUrl)) {
+			var publication = repository.publication();
+			throw new DashboardIncidentNotFoundException(incidentId, publication.eventSeq(), publication.revision());
+		}
+	}
+
+	private static void validateMeetingUrl(String value) {
+		try {
+			URI uri = new URI(value);
+			if (!("https".equals(uri.getScheme()) || "http".equals(uri.getScheme()))
+					|| uri.getHost() == null || uri.getRawUserInfo() != null || uri.getPort() > 65535) {
+				throw new AppException(AppErrors.INVALID_MEETING_LINK);
+			}
+		} catch (URISyntaxException exception) {
+			throw new AppException(AppErrors.INVALID_MEETING_LINK, exception);
+		}
+	}
+
+	private static void validateIncidentId(String incidentId) {
+		if (!INCIDENT_ID.matcher(incidentId).matches()) {
+			throw new AppException(AppErrors.INVALID_INCIDENT_ID);
+		}
 	}
 
 	/**
@@ -98,9 +127,7 @@ public class DashboardIncidentService {
 	}
 
 	private PublishedRow publishedRow(String incidentId) {
-		if (!INCIDENT_ID.matcher(incidentId).matches()) {
-			throw new AppException(AppErrors.INVALID_INCIDENT_ID);
-		}
+		validateIncidentId(incidentId);
 		var publication = repository.publication();
 		return db.query("""
 				SELECT i.source_data, i.source_id FROM itsm_incident i

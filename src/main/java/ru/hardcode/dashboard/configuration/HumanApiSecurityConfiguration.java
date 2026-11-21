@@ -13,6 +13,7 @@ import org.springframework.security.web.servlet.util.matcher.PathPatternRequestM
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import ru.hardcode.dashboard.configuration.HumanJwtConfiguration.HumanDecoder;
+import ru.hardcode.dashboard.controller.MeetingLinkController;
 import ru.hardcode.dashboard.exception.AppErrors;
 import tools.jackson.databind.ObjectMapper;
 
@@ -54,7 +55,7 @@ public class HumanApiSecurityConfiguration {
 				ApiErrorWriter.write(response, objectMapper, AppErrors.COORDINATOR_ACCESS_DENIED);
 
 		return http
-				.securityMatcher(properties.isRequested() ? new String[]{HUMAN_API_PATH} : new String[]{"/api/me","/api/dashboard/**"})
+				.securityMatcher(properties.isRequested() ? new String[]{HUMAN_API_PATH} : new String[]{"/api/me", "/api/dashboard/**", MeetingLinkController.PATH})
 				.csrf(csrf -> csrf.disable())
 				.requestCache(cache -> cache.disable())
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

@@ -549,6 +549,7 @@ final class OpenApiContractValidator {
 		canonical.put("listItsmUsers", "GET /api/dashboard/users");
 		canonical.put("updateIncidentCard", "PATCH " + DASHBOARD_CARD);
 		canonical.put("getIncidentCard", "GET " + DASHBOARD_CARD);
+		canonical.put("saveMeetingLink", "PUT /api/incidents/{id}/meeting-link");
 		canonical.put("listSources", "GET " + DASHBOARD_SOURCES);
 		canonical.put("pollEvents", "GET " + DASHBOARD_EVENTS);
 		canonical.put("acknowledgeEvents", "POST " + DASHBOARD_ACK);

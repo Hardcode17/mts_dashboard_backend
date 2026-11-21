@@ -12,7 +12,7 @@ public record DashboardIncidentCardResponse(
 		String service, String serviceType, String assignedGroupName, String assignedEmployeeLogin,
 		String assignedEmployee, ItsmIncidentState stateEnum, String stateReason, int priorityId, Instant submitDate,
 		Instant lastAssignmentToTeamDateTime, Instant deadline, Instant completionDate, String solution,
-		Long remainingSeconds, boolean overdue, URI itsmUrl, boolean itsmDemo,
+		Long remainingSeconds, boolean overdue, URI itsmUrl, boolean itsmDemo, String meetingUrl,
 		List<Membership> groupMemberships, long eventSeq, long revision
 ) {
 }

@@ -14,6 +14,8 @@ import ru.hardcode.dashboard.entity.ItsmIncidentState;
 @Repository
 public class DashboardIncidentRepository {
 
+	private static final String MEETING_LINK_KEY = "MTS Link";
+
 	private static final String INCIDENTS_FROM = """
 			FROM itsm_incident AS incident
 			JOIN itsm_snapshot_source AS source ON source.source_id = incident.source_id
@@ -57,6 +59,14 @@ public class DashboardIncidentRepository {
 						instant(rs, "changed_at"), instant(rs, "latest_source_date"))).list();
 	}
 
+	public boolean saveMeetingLink(String incidentId, String url) {
+		return jdbc.sql("""
+				UPDATE itsm_incident AS incident
+				SET links_data = jsonb_set(incident.links_data, ARRAY[CAST(:key AS text)], to_jsonb(CAST(:url AS text)))
+				WHERE incident.id = :id AND incident.present_in_source AND incident.last_seen_version IS NOT NULL
+				""").param("id", incidentId).param("key", MEETING_LINK_KEY).param("url", url).update() == 1;
+	}
+
 	public Optional<CardRow> findCard(String incidentId) {
 		return jdbc.sql("""
 				SELECT incident.id, product.product_key, team.group_name, incident.state, incident.priority_id,
@@ -64,7 +74,7 @@ public class DashboardIncidentRepository {
 				       incident.last_assignment_to_team_at, incident.solution, service.service_key,
 				       attributes.header, attributes.description, attributes.product_master_id,
 				       attributes.service_type, attributes.assigned_employee, attributes.assigned_employee_login,
-				       attributes.state_reason
+				       attributes.state_reason, incident.links_data ->> CAST(:key AS text) AS meeting_url
 				""" + INCIDENTS_FROM + """
 				LEFT JOIN itsm_catalog_service AS service ON service.id = incident.service_id
 				CROSS JOIN LATERAL (
@@ -81,12 +91,12 @@ public class DashboardIncidentRepository {
 				                             'assignedEmployee', 'assignedEmployeeLogin', 'stateReason')
 				) AS attributes
 				WHERE incident.present_in_source AND incident.id = :id
-				""").param("id", incidentId)
+				""").param("id", incidentId).param("key", MEETING_LINK_KEY)
 				.query((rs, row) -> new CardRow(summary(rs), rs.getString("header"), rs.getString("description"),
 						rs.getString("product_master_id"), rs.getString("service_key"), rs.getString("service_type"),
 						rs.getString("assigned_employee"), rs.getString("assigned_employee_login"),
 						rs.getString("state_reason"),
-						instant(rs, "last_assignment_to_team_at"), rs.getString("solution")))
+						instant(rs, "last_assignment_to_team_at"), rs.getString("solution"), rs.getString("meeting_url")))
 				.optional();
 	}
 
@@ -113,6 +123,6 @@ public class DashboardIncidentRepository {
 
 	public record CardRow(IncidentSummary summary, String header, String description, String productMasterId,
 			String service, String serviceType, String assignedEmployee, String assignedEmployeeLogin,
-			String stateReason, Instant lastAssignmentToTeamDateTime, String solution) {
+			String stateReason, Instant lastAssignmentToTeamDateTime, String solution, String meetingUrl) {
 	}
 }
