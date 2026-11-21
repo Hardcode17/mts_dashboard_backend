@@ -62,7 +62,19 @@ public enum AppErrors implements AppError {
 	MCP_EVIDENCE_NOT_ATTRIBUTED("MCP_EVIDENCE_NOT_ATTRIBUTED", HttpStatus.BAD_GATEWAY,
 			"Evidence source ${source} returned records that are not attributable to incident ${incidentId} of scenario run ${scenarioRunId}"),
 	MCP_EVIDENCE_OUT_OF_WINDOW("MCP_EVIDENCE_OUT_OF_WINDOW", HttpStatus.BAD_GATEWAY,
-			"Evidence source ${source} returned a record outside the requested evidence window");
+			"Evidence source ${source} returned a record outside the requested evidence window"),
+	AI_EVIDENCE_NOT_MAPPED("AI_EVIDENCE_NOT_MAPPED", HttpStatus.SERVICE_UNAVAILABLE,
+			"The evidence mapping required for an AI investigation is not configured"),
+	AI_MODEL_NOT_CONFIGURED("AI_MODEL_NOT_CONFIGURED", HttpStatus.SERVICE_UNAVAILABLE,
+			"The AI investigation model is not configured; enable the model profile and set its API key"),
+	AI_MODEL_UNAVAILABLE("AI_MODEL_UNAVAILABLE", HttpStatus.BAD_GATEWAY,
+			"The AI model is unavailable: ${reason}"),
+	AI_MODEL_TIMEOUT("AI_MODEL_TIMEOUT", HttpStatus.GATEWAY_TIMEOUT,
+			"The AI model did not answer within ${seconds} seconds"),
+	AI_MODEL_INVALID_REPLY("AI_MODEL_INVALID_REPLY", HttpStatus.BAD_GATEWAY,
+			"The AI model reply is not a valid bounded investigation result"),
+	AI_RUN_NOT_FOUND("AI_RUN_NOT_FOUND", HttpStatus.NOT_FOUND,
+			"Investigation run ${runId} of incident ${incidentId} not found");
 
 	private final String code;
 	private final HttpStatus httpStatus;

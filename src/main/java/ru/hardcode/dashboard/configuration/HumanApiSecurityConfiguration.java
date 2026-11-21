@@ -13,14 +13,15 @@ import org.springframework.security.web.servlet.util.matcher.PathPatternRequestM
 import org.springframework.security.web.util.matcher.OrRequestMatcher;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 import ru.hardcode.dashboard.configuration.HumanJwtConfiguration.HumanDecoder;
+import ru.hardcode.dashboard.controller.AiInvestigationController;
 import ru.hardcode.dashboard.exception.AppErrors;
 import tools.jackson.databind.ObjectMapper;
 
 /**
  * Stateless Bearer JWT chain for the human API under {@code /api/**}. It runs after the ITSM
  * machine chain (which owns {@code /api/integrations/itsm/**}) and before the default
- * health/form-login chain, and it accepts only tokens issued for the human audience. Without auth settings only /api/me is
- * reserved; the previous demo routes keep their existing chain.
+ * health/form-login chain, and it accepts only tokens issued for the human audience. Protected human routes stay
+ * in this chain when auth settings are absent.
  *
  * <p>KAN-64: this is also the only chain with CORS for the browser SPA. Preflight OPTIONS
  * requests are answered by the CORS filter before authentication; the machine chain never
@@ -60,7 +61,10 @@ public class HumanApiSecurityConfiguration {
 				ApiErrorWriter.write(response, objectMapper, AppErrors.COORDINATOR_ACCESS_DENIED);
 
 		return http
-				.securityMatcher(properties.isRequested() ? new String[]{HUMAN_API_PATH} : new String[]{"/api/me","/api/dashboard/**"})
+				.securityMatcher(properties.isRequested()
+						? new String[]{HUMAN_API_PATH}
+						: new String[]{"/api/me", "/api/dashboard/**", AiInvestigationController.PATH,
+								AiInvestigationController.PATH + "/{runId}"})
 				.cors(cors -> cors.configurationSource(ApiCorsConfiguration.apiCorsConfigurationSource(corsProperties)))
 				.csrf(csrf -> csrf.disable())
 				.requestCache(cache -> cache.disable())

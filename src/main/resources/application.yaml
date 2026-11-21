@@ -92,6 +92,16 @@ mcp:
         password: ${MCP_EVIDENCE_DB_PASSWORD:}
         view: ${MCP_EVIDENCE_DB_VIEW:}
 
+ai:
+  investigation:
+    # KAN-40: launch and read of an AI investigation. The real model call is enabled by the
+    # `ai` Spring profile together with this key; blank keeps every launch refused with an
+    # explicit AI_MODEL_NOT_CONFIGURED status, and the incident card stays readable.
+    model-api-key: ${DASHBOARD_AI_DEEPSEEK_API_KEY:}
+    model-timeout: ${DASHBOARD_AI_MODEL_TIMEOUT:PT60S}
+    workers: ${DASHBOARD_AI_WORKERS:2}
+    queue-capacity: ${DASHBOARD_AI_QUEUE_CAPACITY:100}
+
 logging:
   file:
     name: ./logs/dashboard.log

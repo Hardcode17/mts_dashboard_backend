@@ -1314,6 +1314,342 @@ paths:
                 cookieAuthRequired:
                   summary: Нет сессии интерфейса
                   value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
+  /api/incidents/{incidentId}/investigations:
+    post:
+      operationId: launchIncidentInvestigation
+      security: [{coordinatorBearer: []}]
+      summary: Запустить AI-расследование инцидента (KAN-40)
+      description: |
+        Асинхронный запуск расследования по карточке одного INC. Backend читает
+        опубликованную карточку и свидетельства источников KAN-39 за последнее окно
+        наблюдения, привязывает запуск к опубликованной `revision`, сохраняет факты
+        (каждый со своим `evidenceId`), явные пробелы и запрос к модели, и только после
+        этого ставит ответ модели в очередь. Тело ответа — текущее состояние запуска;
+        результат читается через `GET /api/incidents/{incidentId}/investigations/{runId}`.
+
+        У активного INC (`Assigned`, `WorkInProgress`) решение (`solution`) никогда не
+        уходит модели. Реальный вызов модели включается профилем `ai` с ключом; без
+        модели запуск отклоняется явным `503 AI_MODEL_NOT_CONFIGURED`, карточка INC
+        остаётся доступной. Один и тот же INC можно расследовать повторно: запуски не
+        переиспользуются и не перезаписываются.
+      parameters:
+        - {name: incidentId, in: path, required: true, schema: {$ref: '#/components/schemas/IncidentId'}}
+      responses:
+        '202':
+          description: 'Запуск принят; модель отвечает асинхронно. Читай статус через `runId`.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiInvestigationRun'
+              examples:
+                running:
+                  summary: Факты собраны, модель ещё отвечает
+                  value:
+                    runId: 3f9c1d5e-2b47-49a1-8f6c-9d0e1a2b3c4d
+                    incidentId: INC0000420001
+                    status: running
+                    revision: 42
+                    stale: false
+                    windowFrom: '2026-11-20T08:00:00Z'
+                    windowTo: '2026-11-20T10:00:00Z'
+                    hypothesis: null
+                    nextStep: null
+                    facts:
+                      - evidenceId: itsm:INC0000420001
+                        source: ITSM
+                        serviceKey: svc-itsm-checkout
+                        observedAt: '2026-11-20T09:05:00Z'
+                        message: null
+                        messageTruncated: null
+                        level: HIGH
+                        assignedCommand: 'Дежурные платёжных сервисов'
+                        recordCount: null
+                        value: null
+                        serviceState: Assigned
+                      - evidenceId: log:log-rec-1
+                        source: LOG
+                        serviceKey: svc-log-checkout
+                        observedAt: '2026-11-20T09:15:00Z'
+                        message: 'payment authorization timed out'
+                        messageTruncated: false
+                        level: WARN
+                        assignedCommand: null
+                        recordCount: null
+                        value: null
+                        serviceState: null
+                      - evidenceId: diag:diag-rec-1
+                        source: DATABASE
+                        serviceKey: svc-db-checkout
+                        observedAt: '2026-11-20T09:30:00Z'
+                        message: null
+                        messageTruncated: null
+                        level: null
+                        assignedCommand: null
+                        recordCount: 42
+                        value: 99
+                        serviceState: null
+                    unavailableSources: []
+                    errorCode: null
+                    errorMessage: null
+                    createdAt: '2026-11-20T10:00:31.123456Z'
+                    finishedAt: null
+        '400':
+          description: Идентификатор не в формате INC.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidIncidentId:
+                  summary: Идентификатор не в формате INC
+                  value: {"code": "INVALID_INCIDENT_ID", "message": "incidentId must be an INC identifier such as INC000021095531"}
+        '401':
+          description: Требуется Bearer JWT координатора.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                authRequired:
+                  summary: Нет Bearer JWT
+                  value: {"code": "HUMAN_AUTH_REQUIRED", "message": "Human access token is required"}
+        '403':
+          description: Нет локального допуска.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                coordinatorAccessDenied:
+                  summary: Токен без локального допуска координатора
+                  value: {"code": "COORDINATOR_ACCESS_DENIED", "message": "Coordinator access is not granted"}
+        '404':
+          description: INC не найден в публикации или не привязан к источникам свидетельств.
+          content:
+            application/json:
+              schema:
+                anyOf:
+                  - $ref: '#/components/schemas/IncidentNotFound'
+                  - $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                notFound:
+                  summary: INC отсутствует в опубликованной версии
+                  value:
+                    code: INCIDENT_NOT_FOUND
+                    message: Incident INC0000420009 not found
+                    eventSeq: 43
+                    revision: 42
+                evidenceNotMapped:
+                  summary: У INC нет явной привязки к сценарному прогону источников
+                  value: {"code": "MCP_EVIDENCE_INCIDENT_NOT_MAPPED", "message": "Incident INC0000420009 has no explicit mapping to a scenario run"}
+        '503':
+          description: 'Расследование недоступно: не настроена модель или источники свидетельств.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                modelNotConfigured:
+                  summary: Профиль модели или ключ не настроен
+                  value: {"code": "AI_MODEL_NOT_CONFIGURED", "message": "The AI investigation model is not configured; enable the model profile and set its API key"}
+                evidenceNotConfigured:
+                  summary: Маппинг источников свидетельств не настроен
+                  value: {"code": "AI_EVIDENCE_NOT_MAPPED", "message": "The evidence mapping required for an AI investigation is not configured"}
+  '/api/incidents/{incidentId}/investigations/{runId}':
+    get:
+      operationId: getIncidentInvestigation
+      security: [{coordinatorBearer: []}]
+      summary: Прочитать запуск AI-расследования (KAN-40)
+      description: |
+        Возвращает один запуск: статус, привязанную `revision`, собранные факты со
+        свидетельствами, явные пробелы, а для `completed` — гипотезу и следующий шаг.
+        `stale` вычисляется при чтении: `true` означает, что опубликована более новая
+        ревизия и ответ описывает старое состояние INC; сам ответ при этом сохранён и
+        остаётся доступным. Запуск `failed` несёт явный код и причину ошибки вместо
+        выдуманного ответа. Чужой `runId` (другой INC или несуществующий) — `404
+        AI_RUN_NOT_FOUND`.
+      parameters:
+        - {name: incidentId, in: path, required: true, schema: {$ref: '#/components/schemas/IncidentId'}}
+        - {name: runId, in: path, required: true, schema: {type: string, format: uuid}}
+      responses:
+        '200':
+          description: 'Состояние запуска: `running`, `completed` или `failed`; факты и пробелы доступны сразу.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/AiInvestigationRun'
+              examples:
+                completed:
+                  summary: 'Модель ответила: факты, гипотеза и следующий шаг'
+                  value:
+                    runId: 3f9c1d5e-2b47-49a1-8f6c-9d0e1a2b3c4d
+                    incidentId: INC0000420001
+                    status: completed
+                    revision: 42
+                    stale: false
+                    windowFrom: '2026-11-20T08:00:00Z'
+                    windowTo: '2026-11-20T10:00:00Z'
+                    hypothesis: 'Вероятная причина — тайм-аут авторизации платежей из-за недоступности внутреннего сервиса платежного шлюза.'
+                    nextStep: 'Проверить состояние платежного шлюза и очереди авторизаций у команды платёжных сервисов.'
+                    facts:
+                      - evidenceId: itsm:INC0000420001
+                        source: ITSM
+                        serviceKey: svc-itsm-checkout
+                        observedAt: '2026-11-20T09:05:00Z'
+                        message: null
+                        messageTruncated: null
+                        level: HIGH
+                        assignedCommand: 'Дежурные платёжных сервисов'
+                        recordCount: null
+                        value: null
+                        serviceState: Assigned
+                      - evidenceId: log:log-rec-1
+                        source: LOG
+                        serviceKey: svc-log-checkout
+                        observedAt: '2026-11-20T09:15:00Z'
+                        message: 'payment authorization timed out'
+                        messageTruncated: false
+                        level: WARN
+                        assignedCommand: null
+                        recordCount: null
+                        value: null
+                        serviceState: null
+                    unavailableSources: []
+                    errorCode: null
+                    errorMessage: null
+                    createdAt: '2026-11-20T10:00:31.123456Z'
+                    finishedAt: '2026-11-20T10:00:33.654321Z'
+                staleCompleted:
+                  summary: 'Ответ готов, но опубликована более новая ревизия: запуск помечен устаревшим'
+                  value:
+                    runId: 3f9c1d5e-2b47-49a1-8f6c-9d0e1a2b3c4d
+                    incidentId: INC0000420001
+                    status: completed
+                    revision: 42
+                    stale: true
+                    windowFrom: '2026-11-20T08:00:00Z'
+                    windowTo: '2026-11-20T10:00:00Z'
+                    hypothesis: 'Вероятная причина — тайм-аут авторизации платежей из-за недоступности внутреннего сервиса платежного шлюза.'
+                    nextStep: 'Проверить состояние платежного шлюза и очереди авторизаций у команды платёжных сервисов.'
+                    facts:
+                      - evidenceId: itsm:INC0000420001
+                        source: ITSM
+                        serviceKey: svc-itsm-checkout
+                        observedAt: '2026-11-20T09:05:00Z'
+                        message: null
+                        messageTruncated: null
+                        level: HIGH
+                        assignedCommand: 'Дежурные платёжных сервисов'
+                        recordCount: null
+                        value: null
+                        serviceState: Assigned
+                    unavailableSources: []
+                    errorCode: null
+                    errorMessage: null
+                    createdAt: '2026-11-20T10:00:31.123456Z'
+                    finishedAt: '2026-11-20T10:00:33.654321Z'
+                failedTimeout:
+                  summary: 'Модель не ответила вовремя: явная ошибка вместо ответа'
+                  value:
+                    runId: 3f9c1d5e-2b47-49a1-8f6c-9d0e1a2b3c4d
+                    incidentId: INC0000420001
+                    status: failed
+                    revision: 42
+                    stale: false
+                    windowFrom: '2026-11-20T08:00:00Z'
+                    windowTo: '2026-11-20T10:00:00Z'
+                    hypothesis: null
+                    nextStep: null
+                    facts:
+                      - evidenceId: log:log-rec-1
+                        source: LOG
+                        serviceKey: svc-log-checkout
+                        observedAt: '2026-11-20T09:15:00Z'
+                        message: 'payment authorization timed out'
+                        messageTruncated: false
+                        level: WARN
+                        assignedCommand: null
+                        recordCount: null
+                        value: null
+                        serviceState: null
+                    unavailableSources: []
+                    errorCode: AI_MODEL_TIMEOUT
+                    errorMessage: The AI model did not answer within 60 seconds
+                    createdAt: '2026-11-20T10:00:31.123456Z'
+                    finishedAt: '2026-11-20T10:01:31.500000Z'
+                failedSourceGap:
+                  summary: 'Один источник недоступен: пробел назван явно, фактов без него нет'
+                  value:
+                    runId: 3f9c1d5e-2b47-49a1-8f6c-9d0e1a2b3c4d
+                    incidentId: INC0000420001
+                    status: completed
+                    revision: 42
+                    stale: false
+                    windowFrom: '2026-11-20T08:00:00Z'
+                    windowTo: '2026-11-20T10:00:00Z'
+                    hypothesis: 'Источника логов нет в окне: данных для подтверждения тайм-аута авторизации недостаточно.'
+                    nextStep: 'Восстановить чтение логов сервиса и повторить расследование.'
+                    facts:
+                      - evidenceId: itsm:INC0000420001
+                        source: ITSM
+                        serviceKey: svc-itsm-checkout
+                        observedAt: '2026-11-20T09:05:00Z'
+                        message: null
+                        messageTruncated: null
+                        level: HIGH
+                        assignedCommand: 'Дежурные платёжных сервисов'
+                        recordCount: null
+                        value: null
+                        serviceState: Assigned
+                    unavailableSources:
+                      - source: LOG
+                        serviceKey: svc-log-checkout
+                        code: MCP_EVIDENCE_SOURCE_UNAVAILABLE
+                        reason: 'Evidence source LOG is unavailable: connection failed or no record in the evidence window'
+                    errorCode: null
+                    errorMessage: null
+                    createdAt: '2026-11-20T10:00:31.123456Z'
+                    finishedAt: '2026-11-20T10:00:33.654321Z'
+        '400':
+          description: Идентификатор не в формате INC.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidIncidentId:
+                  summary: Идентификатор не в формате INC
+                  value: {"code": "INVALID_INCIDENT_ID", "message": "incidentId must be an INC identifier such as INC000021095531"}
+        '401':
+          description: Требуется Bearer JWT координатора.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                authRequired:
+                  summary: Нет Bearer JWT
+                  value: {"code": "HUMAN_AUTH_REQUIRED", "message": "Human access token is required"}
+        '403':
+          description: Нет локального допуска.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                coordinatorAccessDenied:
+                  summary: Токен без локального допуска координатора
+                  value: {"code": "COORDINATOR_ACCESS_DENIED", "message": "Coordinator access is not granted"}
+        '404':
+          description: Запуск не найден у этого INC.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                runNotFound:
+                  summary: runId не существует или принадлежит другому INC
+                  value: {"code": "AI_RUN_NOT_FOUND", "message": "Investigation run 00000000-0000-0000-0000-000000000000 of incident INC0000420001 not found"}
 components:
   securitySchemes:
     coordinatorBearer:
@@ -1924,4 +2260,175 @@ components:
             - string
             - 'null'
           description: 'Значение атрибута `errorCode`, заданное и равное в обеих записях.'
+      additionalProperties: false
+    AiInvestigationRunStatus:
+      type: string
+      enum:
+        - running
+        - completed
+        - failed
+      description: |
+        `running` — модель ещё отвечает; `completed` — есть гипотеза и следующий шаг;
+        `failed` — явная ошибка вместо ответа.
+    AiInvestigationEvidenceSource:
+      type: string
+      enum:
+        - ITSM
+        - LOG
+        - DATABASE
+      description: Стендовый источник свидетельства KAN-39.
+    AiInvestigationFact:
+      type: object
+      required:
+        - evidenceId
+        - source
+        - serviceKey
+        - observedAt
+      description: |
+        Один факт запуска: ограниченное свидетельство стендового источника. Факт всегда
+        называет `evidenceId` записи источника; поля наблюдения заполняет только сам
+        источник, остальные — `null`. Факт без источника не существует.
+      properties:
+        evidenceId:
+          type: string
+          minLength: 1
+          maxLength: 128
+          description: 'Идентификатор записи источника, например `log:log-rec-1`.'
+        source:
+          $ref: '#/components/schemas/AiInvestigationEvidenceSource'
+        serviceKey:
+          type: string
+          minLength: 1
+          maxLength: 128
+        observedAt:
+          $ref: '#/components/schemas/UtcInstant'
+        message:
+          type:
+            - string
+            - 'null'
+        messageTruncated:
+          type:
+            - boolean
+            - 'null'
+        level:
+          type:
+            - string
+            - 'null'
+        assignedCommand:
+          type:
+            - string
+            - 'null'
+        recordCount:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: Записей источника в окне свидетельств.
+        value:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: Последнее значение диагностической метрики.
+        serviceState:
+          type:
+            - string
+            - 'null'
+      additionalProperties: false
+    AiInvestigationUnavailableSource:
+      type: object
+      required:
+        - source
+        - serviceKey
+        - code
+      description: |
+        Источник, не давший свидетельства при запуске. Пробел хранится вместе с фактом
+        отдельным списком и никогда не превращается в факт или выдуманное свидетельство.
+      properties:
+        source:
+          $ref: '#/components/schemas/AiInvestigationEvidenceSource'
+        serviceKey:
+          type: string
+          minLength: 1
+          maxLength: 128
+        code:
+          type: string
+          minLength: 1
+          pattern: '^[A-Z][A-Z0-9_]*$'
+        reason:
+          type:
+            - string
+            - 'null'
+      additionalProperties: false
+    AiInvestigationRun:
+      type: object
+      required:
+        - runId
+        - incidentId
+        - status
+        - revision
+        - stale
+        - windowFrom
+        - windowTo
+        - facts
+        - unavailableSources
+        - createdAt
+      description: |
+        Один запуск AI-расследования (KAN-40). `revision` — ревизия публикации, против
+        которой запуск сделан; `stale` вычисляется при чтении: `true`, если опубликована
+        более новая ревизия. Факты и пробелы собраны при запуске и не меняются;
+        `hypothesis` и `nextStep` появляются только в `completed`, а в `failed` вместо
+        них — явные `errorCode` и `errorMessage`. Окно свидетельств — те же границы,
+        которые запрашивались у источников KAN-39.
+      properties:
+        runId:
+          type: string
+          format: uuid
+        incidentId:
+          $ref: '#/components/schemas/IncidentId'
+        status:
+          $ref: '#/components/schemas/AiInvestigationRunStatus'
+        revision:
+          $ref: '#/components/schemas/PublishedRevision'
+        stale:
+          type: boolean
+          description: 'Опубликована более новая ревизия: ответ описывает старое состояние INC.'
+        windowFrom:
+          $ref: '#/components/schemas/UtcInstant'
+        windowTo:
+          $ref: '#/components/schemas/UtcInstant'
+        hypothesis:
+          type:
+            - string
+            - 'null'
+          description: 'Гипотеза модели; присутствует только для `completed`.'
+        nextStep:
+          type:
+            - string
+            - 'null'
+          description: 'Следующий шаг координатора; присутствует только для `completed`.'
+        facts:
+          type: array
+          items:
+            $ref: '#/components/schemas/AiInvestigationFact'
+        unavailableSources:
+          type: array
+          items:
+            $ref: '#/components/schemas/AiInvestigationUnavailableSource'
+        errorCode:
+          type:
+            - string
+            - 'null'
+          description: 'Явный код ошибки; присутствует только для `failed`.'
+        errorMessage:
+          type:
+            - string
+            - 'null'
+        createdAt:
+          $ref: '#/components/schemas/UtcInstant'
+        finishedAt:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+          description: 'Момент ответа модели или явной ошибки; `null`, пока `running`.'
       additionalProperties: false
