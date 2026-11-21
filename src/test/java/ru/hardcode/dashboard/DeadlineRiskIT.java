@@ -9,6 +9,8 @@ import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
 import org.springframework.context.annotation.Primary;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -16,12 +18,20 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 /**
  * KAN-82 end-to-end: a snapshot publication triggers one scoring pass, and the card exposes the
- * stored result. The clock is fixed, so the shipped threshold rule gives deterministic categories.
+ * stored result. The clock is fixed, so the fallback threshold rule — pinned here explicitly,
+ * the shipped default is the regression — gives deterministic categories.
  */
 @Import(DeadlineRiskIT.FixedClock.class)
 class DeadlineRiskIT extends DashboardIncidentTestSupport {
 
 	private static final Instant NOW = Instant.parse("2026-11-21T12:02:29Z");
+
+	@DynamicPropertySource
+	static void fallbackThresholdMode(DynamicPropertyRegistry registry) {
+		// This IT pins the simple threshold rule with hand-checkable numbers; the application
+		// default is the feature-aware regression (KAN-82 product decision).
+		registry.add("deadline-risk.mode", () -> "threshold");
+	}
 
 	@Test
 	void scoresActiveIncidentsWithDeadlineOnEverySnapshotPublication() throws Exception {

@@ -7,18 +7,19 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
  * offline (KAN-81, UCI ServiceNow) and replaced here as one config edit — the application code
  * never changes between trainings.
  *
- * <p>KAN-81 verdict: the plain remaining-time rule beats the trained regression (F1 0.778 vs
- * 0.769 on the held-out test), so {@link Mode#THRESHOLD} is the product default. The trained
- * logistic regression stays available as the {@link Mode#REGRESSION} fallback: its weights,
- * category thresholds and feature clamps reproduce {@code tools/deadline_risk_weights.json}
- * without standardization.
+ * <p>Product decision: the feature-aware {@link Mode#REGRESSION} is the default — the team
+ * deliberately prefers the smart forecast (reassignments, stuck cards, assignee load, group
+ * history) even though the plain remaining-time threshold is marginally sharper on the UCI
+ * test (F1 0.778 vs 0.769). The weights are retrained on real MTS history by the KAN-81 script.
+ * {@link Mode#THRESHOLD} stays the simple fallback mode.
  *
  * @param mode           which scoring rule is active
- * @param thresholdHours high when less than this many hours remain until the deadline;
- *                       calibrated on UCI ServiceNow (N = 32.92) and to be recomputed on real
- *                       MTS history
- * @param bufferHours    medium inside the (threshold, buffer) zone, low above it; 2*N by default
- * @param regression     weights, thresholds and feature clamps of the fallback mode
+ * @param thresholdHours fallback mode: high when less than this many hours remain until the
+ *                       deadline; calibrated on UCI ServiceNow (N = 32.92) and to be recomputed
+ *                       on real MTS history
+ * @param bufferHours    fallback mode: medium inside the (threshold, buffer) zone, low above it;
+ *                       2*N by default
+ * @param regression     weights, thresholds and feature clamps of the default mode
  * @param reasons        when a feature becomes a named ground of the assessment
  */
 @ConfigurationProperties(prefix = "deadline-risk")
@@ -33,7 +34,7 @@ public record DeadlineRiskProperties(
 	/** Fail fast on a half-configured model instead of scoring silently with wrong constants. */
 	public DeadlineRiskProperties {
 		if (mode == null) {
-			mode = Mode.THRESHOLD;
+			mode = Mode.REGRESSION;
 		}
 		if (thresholdHours == null) {
 			thresholdHours = 32.92;
@@ -57,7 +58,7 @@ public record DeadlineRiskProperties(
 		}
 	}
 
-	/** The active scoring rule; the default is the KAN-81 winning baseline A. */
+	/** The active scoring rule; the default is the feature-aware regression (product decision). */
 	public enum Mode {
 		THRESHOLD,
 		REGRESSION

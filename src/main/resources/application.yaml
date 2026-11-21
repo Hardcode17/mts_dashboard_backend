@@ -33,20 +33,21 @@ dashboard:
     read-timeout: ${DASHBOARD_ITSM_READ_TIMEOUT:PT5S}
 
 deadline-risk:
-  # KAN-82 model constants. The KAN-81 verdict (UCI ServiceNow) is that the plain remaining-time
-  # rule beats the trained regression: F1 0.778 vs 0.769 on the held-out test, so the threshold
-  # mode is the product default and the regression stays the reference and fallback mode.
-  # Recompute every number offline and replace it here as a single config edit; the code never
-  # changes between trainings.
-  mode: threshold
-  # High when less than this many hours remain until the deadline. Calibrated on UCI
-  # ServiceNow (KAN-81 baseline A, N = 32.92); recompute on real MTS history.
+  # KAN-82 model constants. Product decision: the feature-aware regression is the DEFAULT mode —
+  # the team deliberately prefers the smart forecast (reassignments, stuck cards, assignee load,
+  # group history) even though the plain threshold is marginally sharper on the UCI test
+  # (F1 0.778 vs 0.769); the weights are retrained on real MTS history by the KAN-81 script.
+  # The plain remaining-time threshold stays the simple fallback mode.
+  mode: regression
+  # Fallback mode (deadline-risk.mode: threshold): high when less than this many hours remain
+  # until the deadline. Calibrated on UCI ServiceNow (KAN-81 baseline A, N = 32.92); recompute
+  # on real MTS history.
   threshold-hours: 32.92
-  # Medium inside the (threshold, buffer) zone, low above it. Default 2*N.
+  # Fallback mode: medium inside the (threshold, buffer) zone, low above it. Default 2*N.
   buffer-hours: 65.84
   regression:
-    # Reference/fallback mode (deadline-risk.mode: regression): KAN-81 logistic regression
-    # without standardization, reproduced from tools/deadline_risk_weights.json.
+    # Default mode (deadline-risk.mode: regression): KAN-81 logistic regression without
+    # standardization, reproduced from tools/deadline_risk_weights.json.
     weights:
       w0: 4.379061
       w1: 0.010472

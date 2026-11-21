@@ -13,7 +13,11 @@ import static org.assertj.core.data.Offset.offset;
 class DeadlineRiskScorerTest {
 
 	private static final Instant NOW = Instant.parse("2026-11-21T10:00:00Z");
-	private static final DeadlineRiskProperties DEFAULTS = new DeadlineRiskProperties(null, null, null, null, null);
+	/** What the application ships without any deadline-risk.* overrides. */
+	private static final DeadlineRiskProperties SHIPPED = new DeadlineRiskProperties(null, null, null, null, null);
+	/** The fallback rule, pinned explicitly instead of relying on the shipped default. */
+	private static final DeadlineRiskProperties THRESHOLD = new DeadlineRiskProperties(
+			DeadlineRiskProperties.Mode.THRESHOLD, null, null, null, null);
 	/** Shipped KAN-81 regression constants with hand-checkable numbers. */
 	private static final DeadlineRiskProperties REGRESSION = new DeadlineRiskProperties(
 			DeadlineRiskProperties.Mode.REGRESSION, null, null,
@@ -23,8 +27,13 @@ class DeadlineRiskScorerTest {
 			null);
 
 	@Test
-	void thresholdModeIsTheProductDefaultAndCategorizesByRemainingHours() {
-		var scorer = new DeadlineRiskScorer(DEFAULTS);
+	void applicationDefaultIsTheRegressionMode() {
+		assertThat(SHIPPED.mode()).isEqualTo(DeadlineRiskProperties.Mode.REGRESSION);
+	}
+
+	@Test
+	void thresholdModeCategorizesByRemainingHours() {
+		var scorer = new DeadlineRiskScorer(THRESHOLD);
 
 		// Below N: high; inside (N, buffer): medium; above the buffer: low.
 		assertThat(scorer.evaluate(input(32.91, null)).risk()).isEqualTo(DeadlineRiskLevel.HIGH);
@@ -36,7 +45,7 @@ class DeadlineRiskScorerTest {
 
 	@Test
 	void thresholdBoundariesAreExclusiveOnNAndInclusiveBelowTheBuffer() {
-		var scorer = new DeadlineRiskScorer(DEFAULTS);
+		var scorer = new DeadlineRiskScorer(THRESHOLD);
 
 		assertThat(scorer.evaluate(input(32.92, null)).risk()).isEqualTo(DeadlineRiskLevel.MEDIUM);
 		assertThat(scorer.evaluate(input(65.84, null)).risk()).isEqualTo(DeadlineRiskLevel.LOW);
@@ -44,7 +53,7 @@ class DeadlineRiskScorerTest {
 
 	@Test
 	void thresholdModeExplainsTheCategoryWithTheConfiguredNumbers() {
-		var scorer = new DeadlineRiskScorer(DEFAULTS);
+		var scorer = new DeadlineRiskScorer(THRESHOLD);
 
 		var high = scorer.evaluate(input(12.3, null));
 		assertThat(high.risk()).isEqualTo(DeadlineRiskLevel.HIGH);
@@ -61,7 +70,7 @@ class DeadlineRiskScorerTest {
 
 	@Test
 	void thresholdModeAddsTheGroupMedianGroundWhenHistoryExists() {
-		var scorer = new DeadlineRiskScorer(DEFAULTS);
+		var scorer = new DeadlineRiskScorer(THRESHOLD);
 
 		// The group usually takes 6 h and only 2 h are left: the median confirms the risk.
 		var explained = scorer.evaluate(input(2.0, 6.0));
@@ -79,7 +88,7 @@ class DeadlineRiskScorerTest {
 
 	@Test
 	void thresholdModeScoresWithoutAnyGroupHistory() {
-		var scorer = new DeadlineRiskScorer(DEFAULTS);
+		var scorer = new DeadlineRiskScorer(THRESHOLD);
 
 		var noHistory = scorer.evaluate(new DeadlineRiskInput(null,
 				NOW.plus(Duration.ofHours(10)), NOW, null, 0, 0, 0, Duration.ZERO, 0, 4));
@@ -91,7 +100,7 @@ class DeadlineRiskScorerTest {
 
 	@Test
 	void passedDeadlineStaysHighInTheThresholdMode() {
-		var scorer = new DeadlineRiskScorer(DEFAULTS);
+		var scorer = new DeadlineRiskScorer(THRESHOLD);
 
 		var result = scorer.evaluate(new DeadlineRiskInput("Support", NOW.minusSeconds(600), NOW,
 				6.0, 0, 0, 0, Duration.ZERO, 0, 4));
@@ -105,7 +114,7 @@ class DeadlineRiskScorerTest {
 		var expected = DeadlineRiskResult.unknown(List.of(new DeadlineRiskResult.Reason("no_deadline",
 				"У инцидента нет дедлайна — риск не оценивается")));
 
-		var threshold = new DeadlineRiskScorer(DEFAULTS)
+		var threshold = new DeadlineRiskScorer(THRESHOLD)
 				.evaluate(new DeadlineRiskInput("Support", null, NOW, 6.0, 1, 0, 0, Duration.ofHours(1), 0, 4));
 		var regression = new DeadlineRiskScorer(REGRESSION)
 				.evaluate(new DeadlineRiskInput("Support", null, NOW, 6.0, 1, 0, 0, Duration.ofHours(1), 0, 4));

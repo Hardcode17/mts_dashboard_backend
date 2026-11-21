@@ -10,18 +10,22 @@ import java.util.Locale;
  * KAN-82 deadline risk scoring, driven entirely by the configured constants — no training and
  * no ML runtime. Real numbers arrive from the offline KAN-81 notebook as a config edit.
  *
- * <p>Two modes, selected by {@code deadline-risk.mode}:
+ * <p>Two modes, selected by {@code deadline-risk.mode}. The product default is
+ * {@code regression} (the team's deliberate choice of the feature-aware forecast; its weights,
+ * category thresholds and feature clamps reproduce {@code tools/deadline_risk_weights.json}
+ * without standardization, and it is retrained on real MTS history by the KAN-81 script):
  * <ul>
- * <li>{@code threshold} (the product default): the KAN-81 winning baseline — risk is high when
- * less than {@code deadline-risk.threshold-hours} remain until the deadline, medium inside the
+ * <li>{@code regression}: score = w0 + w1*x1 + … + w7*x7 with category thresholds. x1 — median
+ * resolution time of the resolution group divided by the hours left, x2 — deadline extensions,
+ * x3 — reassignments, x4 — reopenings, x5 — hours without a status change, x6 — assignee's
+ * open incidents, x7 — the ITSM priority; every feature is clamped to the bounds fixed
+ * offline. The score is the raw weighted sum, never a probability. Without a usable group
+ * median the main feature is missing and the assessment yields {@code unknown} rather than
+ * silently degrading.</li>
+ * <li>{@code threshold} (the fallback): the KAN-81 winning baseline — risk is high when less
+ * than {@code deadline-risk.threshold-hours} remain until the deadline, medium inside the
  * buffer zone, low above it. The rule needs only the deadline, so a missing group median never
  * blocks the assessment.</li>
- * <li>{@code regression}: the trained logistic regression, score = w0 + w1*x1 + … + w7*x7 with
- * category thresholds, kept as the reference and fallback. x1 — median resolution time of the
- * resolution group divided by the hours left, x2 — deadline extensions, x3 — reassignments,
- * x4 — reopenings, x5 — hours without a status change, x6 — assignee's open incidents,
- * x7 — the ITSM priority; every feature is clamped to the bounds fixed offline. The score is
- * the raw weighted sum, never a probability.</li>
  * </ul>
  *
  * <p>An incident without a deadline is never scored: the result is
@@ -50,9 +54,10 @@ public class DeadlineRiskScorer {
 	}
 
 	/**
-	 * KAN-81 baseline A, the product default: the remaining time itself is the strongest signal.
-	 * The median comparison is added as an extra ground whenever the group history exists — the
-	 * badge must explain why the risk is high, unlike the plain KAN-46 countdown.
+	 * The fallback rule, marginally sharper on the UCI test (F1 0.778 vs 0.769): the remaining
+	 * time itself is the strongest signal there. The median comparison is added as an extra
+	 * ground whenever the group history exists — the badge must explain why the risk is high,
+	 * unlike the plain KAN-46 countdown.
 	 */
 	private DeadlineRiskResult evaluateThreshold(DeadlineRiskInput input, double remaining) {
 		var reasons = new ArrayList<DeadlineRiskResult.Reason>();
@@ -73,7 +78,8 @@ public class DeadlineRiskScorer {
 	}
 
 	/**
-	 * KAN-81 logistic regression without standardization; every feature is clamped to the offline
+	 * KAN-81 logistic regression without standardization — the product default: the team
+	 * deliberately prefers the feature-aware forecast; every feature is clamped to the offline
 	 * bounds before the weighted sum. Without a usable group median the main feature is missing
 	 * and the assessment is {@code unknown} rather than silently degraded.
 	 */

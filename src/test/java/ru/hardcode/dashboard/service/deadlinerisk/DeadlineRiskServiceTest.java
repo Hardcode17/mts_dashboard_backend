@@ -31,7 +31,9 @@ import static org.mockito.Mockito.verify;
 class DeadlineRiskServiceTest {
 
 	private static final Instant NOW = Instant.parse("2026-11-21T10:00:00Z");
-	private static final DeadlineRiskProperties DEFAULTS = new DeadlineRiskProperties(null, null, null, null, null);
+	/** The fallback rule, pinned explicitly instead of relying on the shipped default. */
+	private static final DeadlineRiskProperties THRESHOLD = new DeadlineRiskProperties(
+			DeadlineRiskProperties.Mode.THRESHOLD, null, null, null, null);
 	private static final DeadlineRiskProperties REGRESSION = new DeadlineRiskProperties(
 			DeadlineRiskProperties.Mode.REGRESSION, null, null,
 			new DeadlineRiskProperties.Regression(
@@ -46,7 +48,7 @@ class DeadlineRiskServiceTest {
 
 	@BeforeEach
 	void setUp() {
-		service = new DeadlineRiskService(repository, new DeadlineRiskScorer(DEFAULTS),
+		service = new DeadlineRiskService(repository, new DeadlineRiskScorer(THRESHOLD),
 				Clock.fixed(NOW, ZoneOffset.UTC), new ObjectMapper());
 	}
 
