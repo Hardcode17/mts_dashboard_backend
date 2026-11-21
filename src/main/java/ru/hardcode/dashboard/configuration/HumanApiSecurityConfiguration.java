@@ -21,9 +21,13 @@ import tools.jackson.databind.ObjectMapper;
  * machine chain (which owns {@code /api/integrations/itsm/**}) and before the default
  * health/form-login chain, and it accepts only tokens issued for the human audience. Without auth settings only /api/me is
  * reserved; the previous demo routes keep their existing chain.
+ *
+ * <p>KAN-64: this is also the only chain with CORS for the browser SPA. Preflight OPTIONS
+ * requests are answered by the CORS filter before authentication; the machine chain never
+ * registers CORS.
  */
 @Configuration(proxyBeanMethods = false)
-@EnableConfigurationProperties(HumanAuthProperties.class)
+@EnableConfigurationProperties({HumanAuthProperties.class, CorsProperties.class})
 public class HumanApiSecurityConfiguration {
 
 	public static final String HUMAN_API_PATH = "/api/**";
@@ -40,6 +44,7 @@ public class HumanApiSecurityConfiguration {
 			CoordinatorAuthorizationManager access,
 			HumanDecoder humanDecoder,
 			HumanAuthProperties properties,
+			CorsProperties corsProperties,
 			ObjectMapper objectMapper
 	) throws Exception {
 		var humanEntryPoint = new StrictBearerAuthenticationEntryPoint(
@@ -55,6 +60,7 @@ public class HumanApiSecurityConfiguration {
 
 		return http
 				.securityMatcher(properties.isRequested() ? new String[]{HUMAN_API_PATH} : new String[]{"/api/me","/api/dashboard/**"})
+				.cors(cors -> cors.configurationSource(ApiCorsConfiguration.apiCorsConfigurationSource(corsProperties)))
 				.csrf(csrf -> csrf.disable())
 				.requestCache(cache -> cache.disable())
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
