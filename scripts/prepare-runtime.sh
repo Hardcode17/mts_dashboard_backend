@@ -4,9 +4,48 @@ umask 077
 : "${BACKEND_ENV_FILE:?Set BACKEND_ENV_FILE}"
 : "${STAND_KEYCLOAK_URL:?Set STAND_KEYCLOAK_URL to the browser-reachable Keycloak base URL (no trailing slash)}"
 : "${STAND_FRONTEND_URL:?Set STAND_FRONTEND_URL to the published frontend origin}"
+case "${STAND_ENABLE_ITSM_MOCK:-false}" in
+  true|false) ;;
+  *) echo 'STAND_ENABLE_ITSM_MOCK must be true or false' >&2; exit 1 ;;
+esac
 mkdir -p "$(dirname "$BACKEND_ENV_FILE")"
 touch "$BACKEND_ENV_FILE"
 chmod 600 "$BACKEND_ENV_FILE"
+
+if [[ "${STAND_ENABLE_ITSM_MOCK:-false}" == true ]]; then
+  # Do not silently replace configuration for an existing external ITSM.
+  mock_setting_is_compatible() {
+    local key="$1" expected="$2" existing
+    existing="$(grep "^${key}=" "$BACKEND_ENV_FILE" || true)"
+    if [[ ( -n "$existing" && "$existing" != "$key=$expected" ) ||
+          ( -v "$key" && "${!key}" != "$expected" ) ]]; then
+      printf 'Refusing to enable the stand ITSM mock: %s is configured differently.\n' "$key" >&2
+      exit 1
+    fi
+  }
+
+  mock_setting_is_compatible BACKEND_PROFILE demo
+  mock_setting_is_compatible DASHBOARD_ITSM_BASE_URL http://itsm-mock:8080
+  mock_setting_is_compatible ITSM_MOCK_TARGET_URL http://backend:8080/api/integrations/itsm/batches
+  mock_setting_is_compatible ITSM_MOCK_SCHEDULED true
+  machine_settings=(
+    "ITSM_INTEGRATION_AUTH_ISSUER=${STAND_KEYCLOAK_URL%/}/realms/dashboard"
+    'ITSM_INTEGRATION_AUTH_JWK_SET_URI=http://keycloak:8080/realms/dashboard/protocol/openid-connect/certs'
+    'ITSM_INTEGRATION_AUTH_AUDIENCE=itsm-ingest'
+    'ITSM_INTEGRATION_AUTH_CLIENT_ID=itsm-sender'
+    'ITSM_INTEGRATION_AUTH_IMPORT_ROLE=itsm:import'
+    'ITSM_MOCK_TOKEN_URL=http://keycloak:8080/realms/dashboard/protocol/openid-connect/token'
+    'ITSM_MOCK_CLIENT_ID=itsm-sender'
+  )
+  for setting in "${machine_settings[@]}"; do
+    mock_setting_is_compatible "${setting%%=*}" "${setting#*=}"
+  done
+  for setting in "${machine_settings[@]}"; do
+    if ! grep -q "^${setting%%=*}=" "$BACKEND_ENV_FILE"; then
+      printf '\n%s\n' "$setting" >> "$BACKEND_ENV_FILE"
+    fi
+  done
+fi
 
 # Generated once and preserved on subsequent deployments: the volumes keep the database
 # and the imported realm.
