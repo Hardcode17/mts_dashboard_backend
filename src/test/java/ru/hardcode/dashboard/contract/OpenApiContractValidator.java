@@ -68,6 +68,7 @@ final class OpenApiContractValidator {
 	private static final String DASHBOARD_SOURCES = "/api/dashboard/sources";
 	private static final String DASHBOARD_EVENTS = "/api/dashboard/events";
 	private static final String DASHBOARD_ACK = "/api/dashboard/events/ack";
+	private static final String DASHBOARD_NOTES = "/api/dashboard/incidents/{incidentId}/notes";
 
 	private final Path docs;
 	private final PublishedHost published;
@@ -558,6 +559,8 @@ final class OpenApiContractValidator {
 		canonical.put("listSources", "GET " + DASHBOARD_SOURCES);
 		canonical.put("pollEvents", "GET " + DASHBOARD_EVENTS);
 		canonical.put("acknowledgeEvents", "POST " + DASHBOARD_ACK);
+		canonical.put("addIncidentNote", "POST " + DASHBOARD_NOTES);
+		canonical.put("listIncidentNotes", "GET " + DASHBOARD_NOTES);
 		canonical.forEach((operationId, route) -> {
 			List<String> found = routes.getOrDefault(operationId, List.of());
 			if (!found.equals(List.of(route))) {
@@ -585,6 +588,7 @@ final class OpenApiContractValidator {
 			violations.add("dashboard-api: ack must require exactly the eventIds set");
 		}
 		checkDashboardExamples();
+		checkNoteScenarios(dashboard);
 	}
 
 	private static boolean hasParameter(JsonNode operation, String location, String name) {
@@ -674,6 +678,53 @@ final class OpenApiContractValidator {
 		checkUtc("sources-stale", sources);
 		checkUtc("events-poll-two-events", events);
 		checkUtc("events-heartbeat", heartbeat);
+	}
+
+	/**
+	 * KAN-43 note scenarios: the create request requires the text and accepts only the
+	 * observation time and the optional author echo; a foreign author is a dedicated error;
+	 * and the history example carries the two-coordinator case — parallel notes with one
+	 * observation time keep distinct ascending {@code eventSeq} and distinct authors in one
+	 * cursor read.
+	 */
+	private void checkNoteScenarios(JsonNode dashboard) {
+		JsonNode requestSchema = operation(dashboard, "post", DASHBOARD_NOTES).path("requestBody")
+				.path("content").path("application/json").path("schema");
+		JsonNode request = requestSchema.has("$ref")
+				? dashboard.at(requestSchema.get("$ref").stringValue().substring(1)) : requestSchema;
+		if (!new HashSet<>(request.path("properties").propertyNames())
+				.equals(Set.of("text", "observedAt", "authorId")) || !contains(request.path("required"), "text")) {
+			violations.add("dashboard-api: note create must require the text and accept only observedAt and authorId");
+		}
+		JsonNode create = operation(dashboard, "post", DASHBOARD_NOTES);
+		if (!"INCIDENT_NOTE_AUTHOR_MISMATCH".equals(create.path("responses").path("403").path("content")
+				.path("application/json").path("examples").path("authorMismatch").path("value")
+				.path("code").stringValue(""))) {
+			violations.add("dashboard-api: note create must document the foreign author error");
+		}
+		if (!"INCIDENT_NOTE_TEXT_INVALID".equals(create.path("responses").path("400").path("content")
+				.path("application/json").path("examples").path("emptyText").path("value")
+				.path("code").stringValue(""))) {
+			violations.add("dashboard-api: note create must document the empty text error");
+		}
+		JsonNode notes = synthetic.get("notes-two-coordinators");
+		if (notes == null) {
+			violations.add("dashboard-api: fixture notes-two-coordinators.json is required");
+			return;
+		}
+		List<JsonNode> page = new ArrayList<>(notes.path("notes").values());
+		boolean oneObservation = page.size() == 2
+				&& page.get(0).path("incidentId").stringValue("")
+						.equals(page.get(1).path("incidentId").stringValue(""))
+				&& page.get(0).path("observedAt").stringValue("")
+						.equals(page.get(1).path("observedAt").stringValue(""))
+				&& !page.get(0).path("noteId").stringValue("").equals(page.get(1).path("noteId").stringValue(""))
+				&& page.get(0).path("authorId").asInt(-1) != page.get(1).path("authorId").asInt(-2)
+				&& page.get(0).path("eventSeq").asInt(-1) < page.get(1).path("eventSeq").asInt(-1);
+		if (!oneObservation) {
+			violations.add("dashboard-api: the note example must carry two parallel notes of one INC with "
+					+ "one observation time, distinct authors and ascending eventSeq");
+		}
 	}
 
 	private static JsonNode findItem(JsonNode items, String id) {

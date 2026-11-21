@@ -67,7 +67,11 @@ public enum AppErrors implements AppError {
 	MCP_EVIDENCE_NOT_ATTRIBUTED("MCP_EVIDENCE_NOT_ATTRIBUTED", HttpStatus.BAD_GATEWAY,
 			"Evidence source ${source} returned records that are not attributable to incident ${incidentId} of scenario run ${scenarioRunId}"),
 	MCP_EVIDENCE_OUT_OF_WINDOW("MCP_EVIDENCE_OUT_OF_WINDOW", HttpStatus.BAD_GATEWAY,
-			"Evidence source ${source} returned a record outside the requested evidence window");
+			"Evidence source ${source} returned a record outside the requested evidence window"),
+	INCIDENT_NOTE_TEXT_INVALID("INCIDENT_NOTE_TEXT_INVALID", HttpStatus.BAD_REQUEST,
+			"Note text must contain 1-4000 non-whitespace characters"),
+	INCIDENT_NOTE_AUTHOR_MISMATCH("INCIDENT_NOTE_AUTHOR_MISMATCH", HttpStatus.FORBIDDEN,
+			"Note author must be the authenticated coordinator");
 
 	private final String code;
 	private final HttpStatus httpStatus;
