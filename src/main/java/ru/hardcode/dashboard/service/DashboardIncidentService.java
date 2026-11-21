@@ -43,7 +43,6 @@ public class DashboardIncidentService {
 
 	private static final Pattern INCIDENT_ID = Pattern.compile("INC[0-9]{6,18}");
 	private static final TypeReference<Map<String, Object>> ROW = new TypeReference<>() {};
-	private static final String COORDINATORS = "КЦ ИТ Координаторы Массовых Инцидентов";
 	private static final Comparator<IncidentRow> INCIDENT_ORDER =
 			Comparator.comparing(DashboardIncidentService::updatedAt).reversed()
 					.thenComparing(row -> row.summary().id());
@@ -200,15 +199,6 @@ public class DashboardIncidentService {
 			db.update("UPDATE itsm_snapshot_source SET change_revision=? WHERE source_id=?", revision, before.source());
 			db.update("UPDATE dashboard_publication SET revision=?,event_seq=event_seq+1 WHERE singleton",
 					revision);
-			// Once an incident leaves the coordinators' queue, its open internal task is completed.
-			boolean handedOff = !COORDINATORS.equals(row.get("assignedGroupName"))
-					|| (changes.containsKey("assignedEmployeeLogin") && row.get("assignedEmployeeLogin") != null);
-			if (handedOff) {
-				db.update("""
-						UPDATE coordination_tasks SET status='completed',finished_at=now(),updated_at=now()
-						WHERE incident_id=? AND status='open'
-						""", incidentId);
-			}
 		}
 		return card(incidentId);
 	}

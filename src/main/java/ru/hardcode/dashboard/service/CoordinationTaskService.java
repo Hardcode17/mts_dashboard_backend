@@ -1,6 +1,7 @@
 package ru.hardcode.dashboard.service;
 
 import java.util.List;
+import java.time.Instant;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -28,6 +29,11 @@ public class CoordinationTaskService {
 		for (String incidentId : repository.enteredIncidents(sourceId, revision, externalGroup)) {
 			repository.insertOpen(incidentId);
 		}
+	}
+
+	/** Uses only full, ordered REST observations; PATCH updates never modify this baseline. */
+	public void observeHandoffs(String sourceId, long version, String snapshot, Instant observedAt) {
+		repository.observeHandoffs(sourceId, version, snapshot, externalGroup, observedAt);
 	}
 
 	@Transactional(readOnly = true)
