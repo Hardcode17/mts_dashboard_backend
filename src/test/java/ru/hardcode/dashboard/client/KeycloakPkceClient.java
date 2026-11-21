@@ -1,8 +1,6 @@
 package ru.hardcode.dashboard.client;
 
 import java.io.IOException;
-import java.net.CookieManager;
-import java.net.CookiePolicy;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.net.URLEncoder;
@@ -16,6 +14,7 @@ import java.security.SecureRandom;
 import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -30,18 +29,14 @@ import tools.jackson.databind.ObjectMapper;
 public final class KeycloakPkceClient {
 
 	private static final Pattern FORM_ACTION = Pattern.compile("action=\"([^\"]+)\"");
-	private static final Pattern FORM_ATTRIBUTE = Pattern.compile("(action|method)=\"([^\"]*)\"");
 	private static final String CLIENT_ID = KeycloakTestContainer.HUMAN_CLIENT_ID;
 	private static final String REDIRECT_URI = "http://localhost:3000/callback";
 
-	// One browser session: Keycloak checks the AUTH_SESSION_ID cookie set on the login page when
-	// the credentials are posted back.
-	private final CookieManager cookies = new CookieManager(null, CookiePolicy.ACCEPT_ALL);
 	private final HttpClient noRedirects = HttpClient.newBuilder()
 			.followRedirects(HttpClient.Redirect.NEVER)
-			.cookieHandler(cookies)
 			.build();
 	private final String realmUrl;
+	private String loginCookies;
 
 	public KeycloakPkceClient(String issuer) {
 		this.realmUrl = issuer.replaceAll("/+$", "") + "/protocol/openid-connect";
@@ -52,7 +47,7 @@ public final class KeycloakPkceClient {
 		Authorization authorization = authorize();
 		HttpResponse<String> response = submitLogin(authorization.loginAction(), username, password);
 		String location = response.headers().firstValue("Location").orElseThrow(
-				() -> new IllegalStateException("Login was rejected; no redirect from the login page"));
+				() -> new IllegalStateException("Login did not redirect: HTTP " + response.statusCode()));
 		String code = queryParameter(location, "code");
 		if (code == null) {
 			throw new IllegalStateException("Login was rejected; redirect without a code");
@@ -70,14 +65,7 @@ public final class KeycloakPkceClient {
 	public Authorization authorize() {
 		String verifier = randomToken(48);
 		String state = randomToken(16);
-		String authorizeUrl = realmUrl + "/auth?response_type=code"
-				+ "&client_id=" + CLIENT_ID
-				+ "&redirect_uri=" + encoded(REDIRECT_URI)
-				+ "&scope=" + encoded("openid profile email")
-				+ "&state=" + encoded(state)
-				+ "&code_challenge=" + pkceChallenge(verifier)
-				+ "&code_challenge_method=S256";
-		HttpResponse<String> page = send(noRedirects, HttpRequest.newBuilder(URI.create(authorizeUrl)).GET().build());
+		HttpResponse<String> page = authorizationPage("auth", state, verifier);
 		if (page.statusCode() != 200) {
 			throw new IllegalStateException("Unexpected authorization page: HTTP " + page.statusCode());
 		}
@@ -85,7 +73,16 @@ public final class KeycloakPkceClient {
 		if (!action.find()) {
 			throw new IllegalStateException("Authorization page has no login form");
 		}
-		return new Authorization(action.group(1).replace("&amp;", "&"), verifier, state);
+		// This fixture uses a local development HTTP endpoint. Forward the session cookie as
+		// received without the legacy JDK cookie parser rewriting or dropping it. It is only
+		// sent to the same Keycloak origin that served the login page.
+		loginCookies = page.headers().allValues("Set-Cookie").stream()
+				.map(cookie -> cookie.split(";", 2)[0]).collect(Collectors.joining("; "));
+		if (loginCookies.isBlank()) {
+			throw new IllegalStateException("Authorization page did not set a session cookie");
+		}
+		String loginAction = page.uri().resolve(action.group(1).replace("&amp;", "&")).toString();
+		return new Authorization(loginAction, verifier, state);
 	}
 
 	public record Authorization(String loginAction, String verifier, String state) {
@@ -93,8 +90,14 @@ public final class KeycloakPkceClient {
 
 	/** Posts the credentials like the login form; without redirects the outcome is a 302. */
 	public HttpResponse<String> submitLogin(String loginAction, String username, String password) {
+		URI url = URI.create(loginAction);
+		URI origin = URI.create(realmUrl);
+		if (!origin.getScheme().equals(url.getScheme()) || !origin.getRawAuthority().equals(url.getRawAuthority())) {
+			throw new IllegalArgumentException("Login form must post to the test Keycloak origin");
+		}
 		return send(noRedirects,
-				HttpRequest.newBuilder(URI.create(loginAction))
+				HttpRequest.newBuilder(url)
+						.header("Cookie", loginCookies)
 						.header("Content-Type", "application/x-www-form-urlencoded")
 						.POST(HttpRequest.BodyPublishers.ofString(encodedForm(Map.of(
 								"username", username,
@@ -149,30 +152,20 @@ public final class KeycloakPkceClient {
 				.build());
 	}
 
-	/** The public registration page; the realm disables self-registration, so it does not exist. */
+	/** An otherwise valid OIDC registration request is refused by the realm's configuration. */
 	public HttpResponse<String> registrationPage() {
-		return send(noRedirects, HttpRequest.newBuilder(URI.create(realmUrl + "/registrations")).GET().build());
+		return authorizationPage("registrations", randomToken(16), randomToken(48));
 	}
 
-	/** Posts a registration form directly; self-registration must be refused. */
-	public HttpResponse<String> submitRegistration(String username, String email) {
-		String password = "kan16-intruder-password";
-		return send(noRedirects, HttpRequest.newBuilder(URI.create(realmUrl + "/registrations"))
-				.header("Content-Type", "application/x-www-form-urlencoded")
-				.POST(HttpRequest.BodyPublishers.ofString(encodedForm(linkedForm(Map.of(
-						"username", username,
-						"email", email,
-						"firstName", "Intruder",
-						"lastName", "Test",
-						"password", password,
-						"passwordConfirm", password)))))
-				.build());
-	}
-
-	private static Map<String, String> linkedForm(Map<String, String> form) {
-		Map<String, String> ordered = new LinkedHashMap<>(form);
-		ordered.put("credentialId", "");
-		return ordered;
+	private HttpResponse<String> authorizationPage(String endpoint, String state, String verifier) {
+		String url = realmUrl + "/" + endpoint + "?response_type=code"
+				+ "&client_id=" + CLIENT_ID
+				+ "&redirect_uri=" + encoded(REDIRECT_URI)
+				+ "&scope=" + encoded("openid profile email")
+				+ "&state=" + encoded(state)
+				+ "&code_challenge=" + pkceChallenge(verifier)
+				+ "&code_challenge_method=S256";
+		return send(noRedirects, HttpRequest.newBuilder(URI.create(url)).GET().build());
 	}
 
 	public static String accessToken(HttpResponse<String> tokenResponse) {

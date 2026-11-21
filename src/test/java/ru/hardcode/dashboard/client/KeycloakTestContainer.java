@@ -1,28 +1,27 @@
 package ru.hardcode.dashboard.client;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import dasniko.testcontainers.keycloak.KeycloakContainer;
 import org.springframework.boot.test.context.TestConfiguration;
-import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
+import org.testcontainers.images.builder.Transferable;
 import org.testcontainers.utility.DockerImageName;
 
 /**
- * Real Keycloak for integration tests. It imports the same realm fixture that {@code compose.yaml}
- * renders (copied to the test classpath by Gradle). The fixture is not a template, so the
- * clearly labelled test credentials are applied to it through the Keycloak Admin API, exactly like
- * an administrator pre-creating accounts.
+ * Real Keycloak for integration tests. It renders the same realm template as {@code compose.auth.yaml}
+ * with disposable test values and imports it before starting the realm.
  *
- * <p>The issuer Keycloak asserts is published as {@link #ISSUER_PROPERTY} before the Spring
- * context starts, so the decoder uses the issuer of the container itself.
+ * <p>Spring tests use the issuer of the container itself.
  */
 @TestConfiguration(proxyBeanMethods = false)
 public class KeycloakTestContainer {
 
 	public static final String IMAGE = "quay.io/keycloak/keycloak:26.4.7";
 	public static final String REALM = "dashboard";
-	public static final String ISSUER_PROPERTY = "keycloak.issuer";
 	public static final String ADMIN_USERNAME = "kan16-admin";
 	public static final String ADMIN_PASSWORD = "kan16-local-admin-test-password";
 
@@ -62,26 +61,33 @@ public class KeycloakTestContainer {
 		return container.getAuthServerUrl().replaceAll("/+$", "") + "/realms/" + REALM;
 	}
 
-	/**
-	 * Sets the test credentials on the imported fixture. Users and client secrets in the fixture
-	 * are not real credentials, so nothing secret is committed.
-	 */
-	static void applyTestCredentials(KeycloakContainer container) {
-		KeycloakAdminTestClient admin = new KeycloakAdminTestClient(issuer(container), ADMIN_USERNAME, ADMIN_PASSWORD);
-		admin.resetPassword(TEST_USERNAME, TEST_PASSWORD);
-		admin.resetClientSecret(MACHINE_CLIENT_ID, ITSM_SENDER_SECRET);
+	public static String jwkSetUri() {
+		return issuer() + "/protocol/openid-connect/certs";
 	}
 
 	private static KeycloakContainer start() {
 		KeycloakContainer container = new KeycloakContainer(
 				DockerImageName.parse(IMAGE).asCompatibleSubstituteFor("quay.io/keycloak/keycloak"))
-				.withRealmImportFile("keycloak/realm/dashboard-realm.json")
+				.withCopyToContainer(Transferable.of(renderRealm()), "/opt/keycloak/data/import/dashboard-realm.json")
 				.withAdminUsername(ADMIN_USERNAME)
 				.withAdminPassword(ADMIN_PASSWORD);
 		container.start();
-		applyTestCredentials(container);
-		System.setProperty(ISSUER_PROPERTY, issuer(container));
 		return container;
+	}
+
+	private static String renderRealm() {
+		try (var template = KeycloakTestContainer.class.getResourceAsStream("/keycloak/realm/dashboard-realm.json")) {
+			if (template == null) {
+				throw new IllegalStateException("Missing dashboard realm template");
+			}
+			return new String(template.readAllBytes(), StandardCharsets.UTF_8)
+					.replace("__DASHBOARD_TEST_USERNAME__", TEST_USERNAME)
+					.replace("__DASHBOARD_TEST_EMAIL__", TEST_EMAIL)
+					.replace("__DASHBOARD_TEST_PASSWORD__", TEST_PASSWORD)
+					.replace("__ITSM_SENDER_CLIENT_SECRET__", ITSM_SENDER_SECRET);
+		} catch (IOException exception) {
+			throw new UncheckedIOException(exception);
+		}
 	}
 
 	private static final class Holder {
@@ -89,7 +95,6 @@ public class KeycloakTestContainer {
 	}
 
 	@Bean
-	@ServiceConnection
 	KeycloakContainer keycloakContainer() {
 		return keycloak();
 	}

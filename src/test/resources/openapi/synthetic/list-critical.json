@@ -54,18 +54,18 @@
       "fixed": null
     },
     {
-      "key": "high",
-      "title": "Высокий приоритет",
-      "rule": "Активный инцидент с priorityId = 3",
+      "key": "coordinator",
+      "title": "На координаторах",
+      "rule": "Активный инцидент или Research, назначенный на координаторов",
       "active": true,
       "incidentCount": 0,
       "incidents": [],
       "fixed": null
     },
     {
-      "key": "coordinator",
-      "title": "На координаторах",
-      "rule": "Активный инцидент или Research, назначенный на координаторов",
+      "key": "high",
+      "title": "Высокий приоритет",
+      "rule": "Активный инцидент с priorityId = 3",
       "active": true,
       "incidentCount": 0,
       "incidents": [],

@@ -9,6 +9,12 @@ request-logging:
   max-cached-body-size: 1MB
   log-request-body: false
 
+dashboard:
+  itsm-link:
+    # A browser-facing URL. The default points to the optional local itsm-mock.
+    template: ${DASHBOARD_ITSM_LINK_TEMPLATE:http://127.0.0.1:8082/api/mock/incidents/{incidentId}}
+    demo: ${DASHBOARD_ITSM_LINK_DEMO:true}
+
 app:
   auth:
     human:

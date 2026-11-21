@@ -1,19 +1,27 @@
 package ru.hardcode.dashboard.exception;
 
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import ru.hardcode.dashboard.dto.AppErrorResponse;
+import ru.hardcode.dashboard.dto.DashboardIncidentNotFoundResponse;
 
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
+	@ExceptionHandler(DashboardIncidentNotFoundException.class)
+	public ResponseEntity<DashboardIncidentNotFoundResponse> handleIncidentNotFound(
+			DashboardIncidentNotFoundException exception) {
+		return ResponseEntity.status(exception.getAppError().getHttpStatus()).body(exception.toResponse());
+	}
+
 	@ExceptionHandler(AppException.class)
 	public ResponseEntity<AppErrorResponse> handleAppException(AppException exception) {
 		AppError error = exception.getAppError();
-		return ResponseEntity.status(error.getHttpStatus())
+		return ResponseEntity.status(error.getHttpStatus()).contentType(MediaType.APPLICATION_JSON)
 				.body(new AppErrorResponse(error.getCode(), exception.getMessage()));
 	}
 

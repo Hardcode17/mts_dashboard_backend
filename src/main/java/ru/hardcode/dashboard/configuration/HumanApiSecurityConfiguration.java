@@ -6,8 +6,12 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
+import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
+import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.web.util.matcher.OrRequestMatcher;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 import ru.hardcode.dashboard.configuration.HumanJwtConfiguration.HumanDecoder;
 import ru.hardcode.dashboard.exception.AppErrors;
 import tools.jackson.databind.ObjectMapper;
@@ -25,6 +29,9 @@ public class HumanApiSecurityConfiguration {
 	public static final String HUMAN_API_PATH = "/api/**";
 	/** Realm name of the human chain's {@code 401} challenge. */
 	static final String HUMAN_REALM = "dashboard-human";
+	static final RequestMatcher DASHBOARD_INCIDENTS = new OrRequestMatcher(
+			PathPatternRequestMatcher.withDefaults().matcher("/api/dashboard/incidents"),
+			PathPatternRequestMatcher.withDefaults().matcher("/api/dashboard/incidents/{incidentId}"));
 
 	@Bean
 	@Order(2)
@@ -34,8 +41,14 @@ public class HumanApiSecurityConfiguration {
 			HumanAuthProperties properties,
 			ObjectMapper objectMapper
 	) throws Exception {
-		StrictBearerAuthenticationEntryPoint authenticationEntryPoint = new StrictBearerAuthenticationEntryPoint(
+		var humanEntryPoint = new StrictBearerAuthenticationEntryPoint(
 				objectMapper, AppErrors.HUMAN_AUTH_REQUIRED, HUMAN_REALM);
+		var dashboardEntryPoint = new StrictBearerAuthenticationEntryPoint(
+				objectMapper, AppErrors.AUTH_REQUIRED, HUMAN_REALM);
+		AuthenticationEntryPoint authenticationEntryPoint = (request, response, error) -> {
+			var entryPoint = DASHBOARD_INCIDENTS.matches(request) ? dashboardEntryPoint : humanEntryPoint;
+			entryPoint.commence(request, response, error);
+		};
 		AccessDeniedHandler accessDeniedHandler = (request, response, exception) ->
 				ApiErrorWriter.write(response, objectMapper, AppErrors.HUMAN_ACCESS_DENIED);
 
