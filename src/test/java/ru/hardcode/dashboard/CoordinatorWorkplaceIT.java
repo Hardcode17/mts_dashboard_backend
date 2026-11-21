@@ -63,7 +63,7 @@ class CoordinatorWorkplaceIT {
 	private static final String LIST_PATH = "/api/dashboard/incidents";
 	private static final String SOURCE_ID = "itcs-mock";
 	private static final String KNOWN_INC = "INC000021931151";
-	private static final String LINK_PREFIX = "http://127.0.0.1:8082/api/mock/incidents/";
+	private static final String LINK_PREFIX = "http://127.0.0.1:8082/itsm_incident/";
 
 	@Autowired
 	private MockMvc mvc;
@@ -144,7 +144,7 @@ class CoordinatorWorkplaceIT {
 				.andExpect(jsonPath("$.id").value(KNOWN_INC))
 				.andExpect(jsonPath("$.productName").value("Автопросматриватель TicTok"))
 				.andExpect(jsonPath("$.deadline").value("2026-11-22T12:02:29Z"))
-				.andExpect(jsonPath("$.itsmUrl").value(LINK_PREFIX + KNOWN_INC))
+				.andExpect(jsonPath("$.itsmUrl").value(LINK_PREFIX + KNOWN_INC + "/page"))
 				.andExpect(jsonPath("$.revision").value(revision));
 
 		// One canonical read model: the journal, card and list share the published revision.
@@ -193,6 +193,18 @@ class CoordinatorWorkplaceIT {
 	private String humanToken() {
 		String token = keycloak.login(KeycloakTestContainer.TEST_USERNAME, KeycloakTestContainer.TEST_PASSWORD);
 		assertThat(token).isNotBlank();
+		try {
+			// Local admission (KAN-22): the workplace test signs in through the real dashboard-web
+			// client, so azp is already correct; only the local users row must exist.
+			String subject = com.nimbusds.jwt.SignedJWT.parse(token).getJWTClaimsSet().getSubject();
+			jdbc.update("""
+					INSERT INTO users(identity_issuer, identity_subject, login, display_name)
+					VALUES (?, ?, ?, 'Coordinator IT')
+					ON CONFLICT (identity_issuer, identity_subject) DO NOTHING
+					""", KeycloakTestContainer.issuer(), subject, KeycloakTestContainer.TEST_USERNAME);
+		} catch (java.text.ParseException unreadable) {
+			throw new IllegalStateException("Unreadable Keycloak token", unreadable);
+		}
 		return token;
 	}
 

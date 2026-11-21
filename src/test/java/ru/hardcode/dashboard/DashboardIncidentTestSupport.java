@@ -2,6 +2,7 @@ package ru.hardcode.dashboard;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
 import java.util.UUID;
 
 import org.junit.jupiter.api.BeforeEach;
@@ -9,25 +10,27 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.test.context.DynamicPropertyRegistry;
+import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import org.springframework.transaction.PlatformTransactionManager;
+import ru.hardcode.dashboard.client.Kan16JwtTestConfiguration;
+import ru.hardcode.dashboard.client.TestJwtSigner;
 import ru.hardcode.dashboard.service.ItsmBatchIntakeService;
 import ru.hardcode.dashboard.service.ItsmSnapshotPublicationService;
 import ru.hardcode.dashboard.worker.ItsmWorkerSqlRepository;
 import ru.hardcode.dashboard.worker.ItsmWorkerTransactionService;
 
 import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 
 @SpringBootTest(properties = {
-		"itsm.worker.enabled=false",
-		"spring.security.user.name=operator",
-		"spring.security.user.password=dashboard-test"
+		"itsm.worker.enabled=false"
 })
 @AutoConfigureMockMvc
 @ActiveProfiles("work")
@@ -36,6 +39,18 @@ abstract class DashboardIncidentTestSupport {
 
 	static final String PATH = "/api/dashboard/incidents";
 	static final String COORDINATORS = "КЦ ИТ Координаторы Массовых Инцидентов";
+	static final String HUMAN_ISSUER = "https://keycloak.test/realms/dashboard";
+	static final String HUMAN_AUDIENCE = "dashboard-human";
+	static final String HUMAN_SUBJECT = "kan7-dashboard-operator";
+
+	@DynamicPropertySource
+	static void humanAuthentication(DynamicPropertyRegistry registry) {
+		// The dashboard reads are owned by the human Bearer JWT chain with local coordinator
+		// admission (KAN-22): a signed test token with azp=dashboard-web and a seeded users row.
+		registry.add("app.auth.human.issuer", () -> HUMAN_ISSUER);
+		registry.add("app.auth.human.audience", () -> HUMAN_AUDIENCE);
+		registry.add("app.auth.human.jwk-set-uri", Kan16JwtTestConfiguration::jwkSetUri);
+	}
 
 	@Autowired MockMvc mvc;
 	@Autowired JdbcTemplate jdbc;
@@ -50,6 +65,14 @@ abstract class DashboardIncidentTestSupport {
 				    itsm_catalog_product, itsm_catalog_service, itsm_catalog_scenario,
 				    itsm_external_group, itsm_external_person, itsm_ingest_catalog_hint CASCADE
 				""");
+		// The publication counters live in their own singleton row: they must not leak
+		// between tests when the batch and journal tables are truncated.
+		jdbc.update("UPDATE dashboard_publication SET event_seq = 0, revision = 0 WHERE singleton");
+		jdbc.update("""
+				INSERT INTO users(identity_issuer, identity_subject, login, display_name)
+				VALUES (?, ?, 'operator', 'Dashboard Operator')
+				ON CONFLICT (identity_issuer, identity_subject) DO NOTHING
+				""", HUMAN_ISSUER, HUMAN_SUBJECT);
 	}
 
 	MockHttpServletRequestBuilder listRequest() {
@@ -57,7 +80,15 @@ abstract class DashboardIncidentTestSupport {
 	}
 
 	MockHttpServletRequestBuilder authenticatedGet(String path, Object... variables) {
-		return get(path, variables).accept(MediaType.APPLICATION_JSON).with(httpBasic("operator", "dashboard-test"));
+		return get(path, variables).accept(MediaType.APPLICATION_JSON)
+				.header(HttpHeaders.AUTHORIZATION, "Bearer " + humanToken());
+	}
+
+	static String humanToken() {
+		return Kan16JwtTestConfiguration.signer().token(TestJwtSigner.claims()
+				.issuer(HUMAN_ISSUER).audience(HUMAN_AUDIENCE).subject(HUMAN_SUBJECT)
+				.claim("azp", "dashboard-web")
+				.expiresAt(Instant.now().plusSeconds(300)));
 	}
 
 	UUID receive(long sourceVersion, String json) {

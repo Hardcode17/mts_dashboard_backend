@@ -95,21 +95,40 @@ class CoordinatorAccessIT {
 
 	@Test
 	void changedTokenUsernameDoesNotChangeIdentity() throws Exception {
-		assertThat(keycloak.execInContainer("/opt/keycloak/bin/kcadm.sh", "config", "credentials",
-				"--server", "http://localhost:8080", "--realm", "master", "--user", "it-admin",
-				"--password", "it-admin-password").getExitCode()).isZero();
+		kcadm("config", "credentials", "--server", "http://localhost:8080", "--realm", "master",
+				"--user", "it-admin", "--password", "it-admin-password");
 		try {
-			assertThat(keycloak.execInContainer("/opt/keycloak/bin/kcadm.sh", "update", "users/" + SUBJECT,
-					"-r", "coordinator-it", "-s", "username=renamed-coordinator").getExitCode()).isZero();
+			kcadm("update", "users/" + SUBJECT, "-r", "coordinator-it", "-s", "username=renamed-coordinator");
 			String renamed = userToken("coordinator-it", "renamed-coordinator");
 			mvc.perform(get("/api/me").header("Authorization", "Bearer " + renamed))
 					.andExpect(status().isOk()).andExpect(jsonPath("$.id").value(userId))
 					.andExpect(jsonPath("$.login").value("coordinator"));
 			assertThat(jdbc.queryForObject("SELECT count(*) FROM users", Long.class)).isEqualTo(1);
 		} finally {
-			assertThat(keycloak.execInContainer("/opt/keycloak/bin/kcadm.sh", "update", "users/" + SUBJECT,
-					"-r", "coordinator-it", "-s", "username=coordinator").getExitCode()).isZero();
+			kcadm("update", "users/" + SUBJECT, "-r", "coordinator-it", "-s", "username=coordinator");
 		}
+	}
+
+	/**
+	 * Runs a kcadm.sh command inside the Keycloak container. The bootstrap administrator is
+	 * created asynchronously after the HTTP endpoint is already serving, and a freshly
+	 * started realm may briefly reject management calls, so a short retry keeps the
+	 * rename reproducible instead of racing the container startup.
+	 */
+	private static void kcadm(String... command) throws Exception {
+		String[] full = new String[command.length + 1];
+		full[0] = "/opt/keycloak/bin/kcadm.sh";
+		System.arraycopy(command, 0, full, 1, command.length);
+		org.testcontainers.containers.Container.ExecResult result = null;
+		for (int attempt = 1; attempt <= 20; attempt++) {
+			result = keycloak.execInContainer(full);
+			if (result.getExitCode() == 0) {
+				return;
+			}
+			Thread.sleep(500);
+		}
+		throw new AssertionError("kcadm " + String.join(" ", command) + " failed with exit code "
+				+ result.getExitCode() + ": " + result.getStderr());
 	}
 
 	@Test
@@ -212,6 +231,9 @@ class CoordinatorAccessIT {
 				"config", Map.of("included.custom.audience", "itsm-ingest", "access.token.claim", "true"));
 		return JSON.writeValueAsBytes(Map.of(
 				"realm", name, "enabled", true, "registrationAllowed", false, "sslRequired", "none",
+				// The rename scenario changes the username through the admin API; the realm
+				// must allow username edits or Keycloak answers read-only.
+				"editUsernameAllowed", true,
 				"roles", Map.of("realm", List.of(Map.of("name", "itsm:import"))),
 				"clients", List.of(
 						Map.of("clientId", "dashboard-web", "publicClient", true, "directAccessGrantsEnabled", true,

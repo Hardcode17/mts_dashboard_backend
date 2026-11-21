@@ -178,6 +178,7 @@ class DashboardIncidentCardIT extends DashboardIncidentTestSupport {
 
 	private static String token(String audience) {
 		return Kan16JwtTestConfiguration.signer().token(TestJwtSigner.claims().issuer(ISSUER).audience(audience)
+				.subject(HUMAN_SUBJECT).claim("azp", "dashboard-web")
 				.expiresAt(Instant.now().plusSeconds(300)));
 	}
 

@@ -8,7 +8,6 @@ import org.springframework.http.MediaType;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.contains;
-import static org.hamcrest.Matchers.endsWith;
 import static org.hamcrest.Matchers.hasSize;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -138,8 +137,12 @@ class DashboardIncidentListIT extends DashboardIncidentTestSupport {
 					.andExpect(jsonPath("$.code").value("AUTH_REQUIRED"))
 					.andExpect(jsonPath("$.message").value("Authentication is required"));
 		}
+		// The dashboard reads belong to the stateless human Bearer chain (KAN-22): an
+		// unauthenticated browser also receives the documented 401 JSON, not a form redirect.
 		mvc.perform(get(PATH).accept("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"))
-				.andExpect(status().isFound()).andExpect(header().string("Location", endsWith("/login")));
+				.andExpect(status().isUnauthorized())
+				.andExpect(jsonPath("$.code").value("AUTH_REQUIRED"))
+				.andExpect(jsonPath("$.message").value("Authentication is required"));
 
 		var filtered = listRequest().param("group", "coordinator").param("limit", "1");
 		var first = mvc.perform(filtered).andExpect(status().isOk()).andExpect(header().exists("ETag"))
