@@ -1,7 +1,7 @@
 FROM eclipse-temurin:21-jdk-jammy AS build
 WORKDIR /workspace
 COPY . .
-RUN chmod +x gradlew && ./gradlew --no-daemon bootJar -x test \
+RUN chmod +x gradlew && ./gradlew --no-daemon :bootJar -x test \
     && find build/libs -maxdepth 1 -name '*.jar' ! -name '*-plain.jar' -exec cp {} /app.jar \;
 
 FROM eclipse-temurin:21-jre-jammy

@@ -1,0 +1,86 @@
+openapi: 3.1.0
+info:
+  title: Приём полного снимка ITSM
+  version: 0.1.0
+  description: Предлагаемый контракт отправителя KAN-53 для согласования с приёмником KAN-27.
+paths:
+  /api/integrations/itsm/batches:
+    post:
+      summary: Принять полный снимок инцидентов
+      security:
+        - machineBearer: []
+      parameters:
+        - in: header
+          name: Idempotency-Key
+          required: true
+          description: UUID пакета. Повтор доставки сохраняет этот ключ, версию и тело.
+          schema:
+            type: string
+            format: uuid
+        - in: header
+          name: X-Source-Id
+          required: true
+          description: Постоянный идентификатор экземпляра источника.
+          schema:
+            type: string
+        - in: header
+          name: X-Source-Version
+          required: true
+          description: Монотонная версия полного снимка в пределах источника.
+          schema:
+            type: integer
+            format: int64
+            minimum: 1
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: array
+              items:
+                type: object
+                required: [id]
+                properties:
+                  id:
+                    type: string
+                additionalProperties: true
+            examples:
+              empty:
+                summary: Полный снимок без активных записей
+                value: []
+      responses:
+        '202':
+          description: Пакет принят для фоновой обработки.
+          headers:
+            Location:
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [batchId]
+                properties:
+                  batchId:
+                    type: string
+        '400':
+          description: Некорректный вход.
+        '401':
+          description: Требуется токен машинного клиента.
+        '403':
+          description: Токен без права импорта.
+        '409':
+          description: Ключ пакета уже использован для другого тела.
+        '413':
+          description: Пакет превышает ограничение на размер тела.
+        '422':
+          description: Снимок отклонён валидатором, если проверка выполняется до постановки в очередь.
+        '429':
+          description: Приёмник временно ограничил поток запросов.
+        '503':
+          description: Приёмник временно недоступен.
+components:
+  securitySchemes:
+    machineBearer:
+      type: http
+      scheme: bearer

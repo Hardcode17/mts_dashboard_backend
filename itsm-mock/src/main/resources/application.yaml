@@ -1,0 +1,18 @@
+server:
+  port: 8080
+itsm:
+  mock:
+    target-url: ${ITSM_MOCK_TARGET_URL:http://backend:8080/api/integrations/itsm/batches}
+    token-url: ${ITSM_MOCK_TOKEN_URL:}
+    client-id: ${ITSM_MOCK_CLIENT_ID:}
+    client-secret: ${ITSM_MOCK_CLIENT_SECRET:}
+    source-id: ${ITSM_MOCK_SOURCE_ID:demo-itsm}
+    seed: ${ITSM_MOCK_SEED:53}
+    batch-size: ${ITSM_MOCK_BATCH_SIZE:12}
+    state-file: ${ITSM_MOCK_STATE_FILE:/var/lib/itsm-mock/snapshot.json}
+    fixture-file: ${ITSM_MOCK_FIXTURE_FILE:}
+    interval: ${ITSM_MOCK_INTERVAL:PT30S}
+    scheduled: ${ITSM_MOCK_SCHEDULED:true}
+    timeout: ${ITSM_MOCK_TIMEOUT:PT5S}
+    retry-delay: ${ITSM_MOCK_RETRY_DELAY:PT0.25S}
+    max-attempts: ${ITSM_MOCK_MAX_ATTEMPTS:3}
