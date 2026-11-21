@@ -45,6 +45,11 @@ if [[ "${STAND_ENABLE_ITSM_MOCK:-false}" == true ]]; then
       printf '\n%s\n' "$setting" >> "$BACKEND_ENV_FILE"
     fi
   done
+  if ! grep -q '^DASHBOARD_ITSM_LINK_TEMPLATE=' "$BACKEND_ENV_FILE"; then
+    stand_card_url="${STAND_FRONTEND_URL%/}/itsm_incident/{incidentId}/page"
+    printf '\nDASHBOARD_ITSM_LINK_TEMPLATE=%s\n' \
+      "${DASHBOARD_ITSM_LINK_TEMPLATE:-$stand_card_url}" >> "$BACKEND_ENV_FILE"
+  fi
 fi
 
 # Generated once and preserved on subsequent deployments: the volumes keep the database
