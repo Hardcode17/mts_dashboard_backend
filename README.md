@@ -44,6 +44,34 @@ Dockerfile выполняет bootJar без тестов. Локальные т
 ./gradlew.bat test; нужны Java 21, доступ к зависимостям и Docker для Testcontainers.
 При ошибке workflow выводит логи обоих сервисов. Автоматического отката нет.
 
+## Рабочая база и Flyway (KAN-19)
+
+Для рабочего режима используйте отдельную БД и отдельный том. Профиль `work`
+применяет миграции из `db/migration` и проверяет их контрольные суммы при старте.
+Демонстрационная миграция `db/demo/V1` остаётся в истории старой БД. Оба профиля
+запускаются с отключёнными внешними AI-сервисами.
+
+1. Сохраните резервную копию демонстрационного тома и `runtime.env`. Для рабочей
+   базы создайте отдельный env-файл вне репозитория с правами 600 и случайным
+   `WORK_POSTGRES_PASSWORD`.
+2. Запустите рабочий стек отдельно от демо. При необходимости задайте
+   `WORK_BACKEND_PORT` в рабочем env-файле (по умолчанию 8083).
+
+   ```sh
+   docker compose -f compose.work.yaml --env-file "$WORK_ENV_FILE" up -d --build
+   curl -fsS http://127.0.0.1:8083/health
+   docker compose -f compose.work.yaml --env-file "$WORK_ENV_FILE" exec -T work-postgres \
+     psql -U dashboard -d dashboard_work -c 'SELECT version, script, success FROM flyway_schema_history ORDER BY installed_rank;'
+   ```
+
+3. Проверьте, что в рабочей истории есть `V2__itsm_ingest_batch.sql`, и выполните
+   обычный демо-smoke. Для пробного отключения остановите рабочий стек командой
+   `docker compose -f compose.work.yaml --env-file "$WORK_ENV_FILE" stop`.
+   Повторный запуск использует тот же рабочий том.
+
+Интеграционная проверка с PostgreSQL 17 и MockMvc:
+`sh ./gradlew :test --tests '*WorkDatabaseIT'`.
+
 ## Приём снимков ITSM (KAN-27)
 
 Машинный приём полного снимка, идемпотентность, ограничение очереди и состояние

@@ -7,6 +7,8 @@ import ru.hardcode.dashboard.entity.ItsmBatchStatus;
 
 /**
  * Operational metadata for one accepted snapshot. The raw payload is intentionally absent.
+ * {@code nextAttemptAt} is set only when the KAN-54 worker scheduled an automatic retry of a
+ * failed batch.
  */
 public record ItsmBatchMetadataResponse(
 		UUID batchId,
@@ -14,6 +16,7 @@ public record ItsmBatchMetadataResponse(
 		long sourceVersion,
 		Instant receivedAt,
 		ItsmBatchStatus status,
-		String diagnostic
+		String diagnostic,
+		Instant nextAttemptAt
 ) {
 }

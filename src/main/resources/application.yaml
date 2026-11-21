@@ -13,6 +13,16 @@ itsm:
   intake:
     max-outstanding-batches: ${ITSM_INTAKE_MAX_OUTSTANDING_BATCHES:1000}
     stale-after: ${ITSM_INTAKE_STALE_AFTER:PT90S}
+  worker:
+    # Runs only when a real ItsmBatchProcessor bean exists (KAN-55); otherwise batches stay RECEIVED.
+    enabled: ${ITSM_WORKER_ENABLED:true}
+    workers: ${ITSM_WORKER_WORKERS:2}
+    max-attempts: ${ITSM_WORKER_MAX_ATTEMPTS:5}
+    retry-base-delay: ${ITSM_WORKER_RETRY_BASE_DELAY:PT30S}
+    poll-interval: ${ITSM_WORKER_POLL_INTERVAL:PT1S}
+    drain-timeout: ${ITSM_WORKER_DRAIN_TIMEOUT:PT30S}
+    recovery-interval: ${ITSM_WORKER_RECOVERY_INTERVAL:PT30S}
+    recovery-heartbeat-timeout: ${ITSM_WORKER_RECOVERY_HEARTBEAT_TIMEOUT:PT10M}
   integration:
     auth:
       issuer: ${ITSM_INTEGRATION_AUTH_ISSUER:}

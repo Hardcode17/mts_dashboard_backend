@@ -1,0 +1,24 @@
+# Dedicated work database. Never point this profile at the existing demo database.
+spring:
+  flyway:
+    locations: classpath:db/migration
+    validate-on-migrate: true
+  jpa:
+    hibernate:
+      ddl-auto: validate
+  ai:
+    model:
+      chat: none
+      embedding: none
+    vectorstore:
+      type: none
+    mcp:
+      client:
+        enabled: false
+      server:
+        enabled: false
+    chat:
+      client:
+        enabled: false
+        tool-search-advisor:
+          enabled: false

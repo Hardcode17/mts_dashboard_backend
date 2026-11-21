@@ -9,14 +9,18 @@ import java.util.Optional;
 import java.util.UUID;
 import java.util.regex.Pattern;
 
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 import ru.hardcode.dashboard.entity.ItsmIngestBatch;
 import ru.hardcode.dashboard.exception.AppErrors;
 import ru.hardcode.dashboard.exception.AppException;
 import ru.hardcode.dashboard.repository.ItsmBatchSqlRepository;
 import ru.hardcode.dashboard.repository.ItsmIngestBatchRepository;
+import ru.hardcode.dashboard.worker.ItsmWorkerLink;
 import tools.jackson.core.JacksonException;
 import tools.jackson.core.JsonParser;
 import tools.jackson.databind.JsonNode;
@@ -24,7 +28,8 @@ import tools.jackson.databind.ObjectMapper;
 
 /**
  * Validates and durably accepts one full ITSM snapshot. It deliberately does not apply
- * KAN-21 record validation or run a KAN-54 worker.
+ * KAN-21 record validation or process the snapshot. The KAN-54 worker loads committed batches
+ * from the database; intake only notifies it after commit and never hands over its transaction.
  */
 @Service
 public class ItsmBatchIntakeService {
@@ -38,12 +43,14 @@ public class ItsmBatchIntakeService {
 	private final ItsmIngestBatchRepository batchRepository;
 	private final ItsmBatchSqlRepository sqlRepository;
 	private final ObjectMapper objectMapper;
+	private final ObjectProvider<ItsmWorkerLink> workerLinkProvider;
 	private final int maxOutstandingBatches;
 
 	public ItsmBatchIntakeService(
 			ItsmIngestBatchRepository batchRepository,
 			ItsmBatchSqlRepository sqlRepository,
 			ObjectMapper objectMapper,
+			ObjectProvider<ItsmWorkerLink> workerLinkProvider,
 			@Value("${itsm.intake.max-outstanding-batches:1000}") int maxOutstandingBatches
 	) {
 		if (maxOutstandingBatches < 0) {
@@ -52,6 +59,7 @@ public class ItsmBatchIntakeService {
 		this.batchRepository = batchRepository;
 		this.sqlRepository = sqlRepository;
 		this.objectMapper = objectMapper;
+		this.workerLinkProvider = workerLinkProvider;
 		this.maxOutstandingBatches = maxOutstandingBatches;
 	}
 
@@ -91,6 +99,7 @@ public class ItsmBatchIntakeService {
 				receivedAt
 		);
 		if (inserted) {
+			notifyWorkerAfterCommit();
 			return batchId;
 		}
 
@@ -104,6 +113,39 @@ public class ItsmBatchIntakeService {
 			throw new AppException(AppErrors.ITSM_SOURCE_VERSION_CONFLICT);
 		}
 		throw new AppException(AppErrors.ITSM_IDEMPOTENCY_CONFLICT);
+	}
+
+	/**
+	 * The worker is notified only once the intake transaction commits, so it can never observe an
+	 * uncommitted batch or join the HTTP transaction. If the transaction rolls back, no
+	 * notification is sent and nothing is claimed.
+	 */
+	private void notifyWorkerAfterCommit() {
+		if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+			wakeWorker();
+			return;
+		}
+		TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+			@Override
+			public void afterCommit() {
+				wakeWorker();
+			}
+		});
+	}
+
+	/**
+	 * Resolves the link lazily: the worker may be created after intake during start-up, and not
+	 * at all when no processor exists. A notification failure never affects intake.
+	 */
+	private void wakeWorker() {
+		try {
+			ItsmWorkerLink link = workerLinkProvider.getIfAvailable();
+			if (link != null) {
+				link.wake();
+			}
+		} catch (RuntimeException ignored) {
+			// The database remains the queue: the worker poll picks the batch up anyway.
+		}
 	}
 
 	private UUID replayOrConflict(

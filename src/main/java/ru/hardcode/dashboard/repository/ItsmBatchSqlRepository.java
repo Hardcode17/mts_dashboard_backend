@@ -41,9 +41,12 @@ public class ItsmBatchSqlRepository {
 
 	public long countOutstanding() {
 		Long count = jdbcTemplate.queryForObject(
-				"SELECT count(*) FROM itsm_ingest_batch WHERE status IN (?, ?)",
+				"""
+				SELECT count(*) FROM itsm_ingest_batch
+				WHERE status IN (?, ?) OR (status = ? AND next_attempt_at IS NOT NULL)
+				""",
 				Long.class,
-				ItsmBatchStatus.RECEIVED.name(), ItsmBatchStatus.PROCESSING.name()
+				ItsmBatchStatus.RECEIVED.name(), ItsmBatchStatus.PROCESSING.name(), ItsmBatchStatus.FAILED.name()
 		);
 		return count == null ? 0 : count;
 	}
@@ -90,7 +93,7 @@ public class ItsmBatchSqlRepository {
 	public Optional<StoredMetadata> findMetadata(UUID id) {
 		List<StoredMetadata> rows = jdbcTemplate.query(
 				"""
-				SELECT id, source_id, source_version, received_at, status, diagnostic
+				SELECT id, source_id, source_version, received_at, status, diagnostic, next_attempt_at
 				FROM itsm_ingest_batch
 				WHERE id = ?
 				""",
@@ -100,7 +103,8 @@ public class ItsmBatchSqlRepository {
 						rs.getLong("source_version"),
 						instant(rs, "received_at"),
 						ItsmBatchStatus.valueOf(rs.getString("status")),
-						rs.getString("diagnostic")
+						rs.getString("diagnostic"),
+						instant(rs, "next_attempt_at")
 				),
 				id
 		);
@@ -155,7 +159,8 @@ public class ItsmBatchSqlRepository {
 			long sourceVersion,
 			Instant receivedAt,
 			ItsmBatchStatus status,
-			String diagnostic
+			String diagnostic,
+			Instant nextAttemptAt
 	) {
 	}
 
