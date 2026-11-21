@@ -76,6 +76,25 @@ info:
     `machineBearer` (предлагается). В KAN-27 машинная цепочка с правом импорта действует
     только на `/api/integrations/itsm/**`.
 
+    ## Подключение браузерного SPA (KAN-64)
+
+    Фронтенд (React + Vite) ходит на `/api/**` со своего origin и авторизуется
+    Authorization Code + PKCE через публичный клиент `dashboard-web`; полученный access
+    token отправляется в `Authorization: Bearer`. Кросс-доменные запросы браузера
+    обслуживает CORS-конфигурация человеческой цепочки:
+
+    - разрешённые origins — env `APP_CORS_ALLOWED_ORIGINS` (через запятую), по умолчанию
+      dev-origins `http://localhost:3000,http://localhost:5173`;
+    - методы `GET/POST/PATCH/PUT/DELETE/OPTIONS`; заголовки запроса `Authorization`,
+      `Content-Type`, `If-None-Match`, `X-Request-Id`; preflight `OPTIONS` проходит без
+      аутентификации и кешируется на час;
+    - браузеру доступны заголовки ответа `ETag`, `Location`, `X-Request-Id`;
+    - чужой origin не получает `Access-Control-Allow-Origin` (403 без CORS-заголовков);
+      ответ без токена — `401`.
+
+    Машинная цепочка `/api/integrations/itsm/**` CORS не открывает: приём снимков —
+    серверный маршрут вне браузера. Подробности подключения — `docs/spa-access.md`.
+
     ## Ошибки
 
     JSON-ошибки — `ErrorResponse` (`code`, `message`), как во всём приложении. Развёрнутая
@@ -913,6 +932,146 @@ paths:
                     message: Incident not found
                     eventSeq: 0
                     revision: 0
+  '/api/dashboard/incidents/{incidentId}/similar':
+    get:
+      operationId: suggestSimilarIncidents
+      security: [{coordinatorBearer: []}]
+      summary: Похожие инциденты с объяснением совпадения (KAN-42)
+      description: |
+        Детерминированные подсказки похожих INC, построенные только из опубликованного
+        снимка: кандидат делит с выбранным INC один сервис каталога и зарегистрирован в
+        включающем окне ±72 ч от его `submitDate`. Оценка — сумма совпавших признаков:
+        сервис 50, сценарий 20, код ошибки 30 (когда атрибут `errorCode` задан и равен в
+        обеих записях), близость времени 10 при разнице ≤ 6 ч и 5 при ≤ 24 ч. Равные
+        оценки упорядочиваются по номеру, каждый INC встречается один раз. Флаги
+        `isDouble`/`isMaster` показываются как контекст и никогда не создают подсказку;
+        подтверждение связи — отдельное действие координатора, чтение ничего не пишет.
+        Без известного сервиса или совпадений список пуст.
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          description: 'Строковый INC, URL-кодируется; числовой вид не принимается.'
+          schema:
+            $ref: '#/components/schemas/IncidentId'
+          examples:
+            withKnownService:
+              value: "INC000021095532"
+        - name: limit
+          in: query
+          required: false
+          description: 'Максимум кандидатов в ответе, 1–100; по умолчанию 10.'
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 100
+            default: 10
+      responses:
+        '200':
+          description: 'Кандидаты по убыванию оценки; пустой список — сведений недостаточно.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/SimilarIncidentSuggestions'
+              examples:
+                matchedPair:
+                  summary: 'Тот же сервис, окно 72 ч: сильный кандидат и кандидат только по сервису'
+                  value:
+                    incidentId: INC000021095532
+                    eventSeq: 43
+                    revision: 42
+                    candidates:
+                      - incidentId: INC000021095531
+                        score: 110
+                        reasons:
+                          - 'Совпадает сервис: «checkout-api»'
+                          - 'Регистрации отличаются на 1 мин — в пределах окна 72 ч'
+                          - 'Совпадает сценарий: «Оплата заказа»'
+                          - 'Совпадает код ошибки: «ERR-17»'
+                        sharedAttributes:
+                          productName: Оплата заказов
+                          service: checkout-api
+                          scenarioName: Оплата заказа
+                          errorCode: ERR-17
+                        header: Сбой приёма платежей на кассах
+                        stateEnum: Assigned
+                        priorityId: 4
+                        submitDate: '2026-11-21T09:00:00Z'
+                        submitDifferenceSeconds: 60
+                        isDouble: false
+                        isMaster: false
+                      - incidentId: INC000021095538
+                        score: 60
+                        reasons:
+                          - 'Совпадает сервис: «checkout-api»'
+                          - 'Регистрации отличаются на 2 мин — в пределах окна 72 ч'
+                        sharedAttributes:
+                          productName: Оплата заказов
+                          service: checkout-api
+                          scenarioName: null
+                          errorCode: null
+                        header: Единичные оплаты не проходят из мобильного приложения
+                        stateEnum: WorkInProgress
+                        priorityId: 3
+                        submitDate: '2026-11-21T09:03:00Z'
+                        submitDifferenceSeconds: 120
+                        isDouble: false
+                        isMaster: false
+                insufficientData:
+                  summary: 'У выбранного INC нет известного сервиса — предложений нет'
+                  value:
+                    incidentId: INC000021095541
+                    eventSeq: 43
+                    revision: 42
+                    candidates: []
+        '400':
+          description: Некорректный идентификатор или размер страницы.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidIncidentId:
+                  summary: Идентификатор не в формате INC
+                  value: {"code": "INVALID_INCIDENT_ID", "message": "incidentId must be an INC identifier such as INC000021095531"}
+                invalidLimit:
+                  summary: Размер страницы вне допустимого диапазона
+                  value: {"code": "INVALID_LIMIT", "message": "limit must be between 1 and 100"}
+        '401':
+          description: Нет допустимой сессии или токена.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                cookieAuthRequired:
+                  summary: Нет сессии интерфейса
+                  value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
+        '403':
+          description: Токен или сессия без нужного права.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                coordinatorAccessDenied:
+                  summary: Нет локального допуска координатора
+                  value: {"code": "COORDINATOR_ACCESS_DENIED", "message": "Coordinator access is not granted"}
+        '404':
+          description: Инцидент отсутствует в опубликованной версии.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentNotFound'
+              examples:
+                notFound:
+                  summary: INC отсутствует в опубликованной версии
+                  value:
+                    code: INCIDENT_NOT_FOUND
+                    message: Incident INC000021095599 not found
+                    eventSeq: 43
+                    revision: 42
   /api/dashboard/sources:
     get:
       operationId: listSources
@@ -1659,4 +1818,110 @@ components:
         message:
           type: string
           minLength: 1
+      additionalProperties: false
+    SimilarIncidentSuggestions:
+      type: object
+      description: |
+        Похожие INC для выбранного инцидента. Кандидаты упорядочены по убыванию оценки,
+        при равенстве — по номеру; каждый номер встречается один раз. Чтение не создаёт
+        связей между инцидентами.
+      required:
+        - incidentId
+        - eventSeq
+        - revision
+        - candidates
+      properties:
+        incidentId:
+          $ref: '#/components/schemas/IncidentId'
+        eventSeq:
+          $ref: '#/components/schemas/EventSeq'
+        revision:
+          $ref: '#/components/schemas/PublishedRevision'
+        candidates:
+          type: array
+          description: 'Пуст, когда у INC нет известного сервиса или совпадений в окне.'
+          items:
+            $ref: '#/components/schemas/SimilarIncidentCandidate'
+      additionalProperties: false
+    SimilarIncidentCandidate:
+      type: object
+      description: Один кандидат с объяснением совпадения.
+      required:
+        - incidentId
+        - score
+        - reasons
+        - sharedAttributes
+        - stateEnum
+        - priorityId
+        - submitDate
+        - submitDifferenceSeconds
+        - isDouble
+        - isMaster
+      properties:
+        incidentId:
+          $ref: '#/components/schemas/IncidentId'
+        score:
+          type: integer
+          format: int32
+          minimum: 0
+          description: 'Сумма весов совпавших признаков: сервис 50, сценарий 20, код ошибки 30, близость времени 10 или 5.'
+        reasons:
+          type: array
+          minItems: 1
+          description: 'Человекочитаемые основания предложения, по одному на совпавший признак.'
+          items:
+            type: string
+            minLength: 1
+        sharedAttributes:
+          $ref: '#/components/schemas/SimilarIncidentSharedAttributes'
+        header:
+          type:
+            - string
+            - 'null'
+          description: Заголовок кандидата для быстрой оценки без открытия карточки.
+        stateEnum:
+          $ref: '#/components/schemas/ItsmIncidentState'
+        priorityId:
+          type: integer
+          format: int32
+        submitDate:
+          $ref: '#/components/schemas/UtcInstant'
+        submitDifferenceSeconds:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 'Абсолютная разница регистраций кандидата и выбранного INC в секундах.'
+        isDouble:
+          type:
+            - boolean
+            - 'null'
+          description: 'Флаг ITSM «дубль»; контекст, оценка его не использует.'
+        isMaster:
+          type:
+            - boolean
+            - 'null'
+          description: 'Флаг ITSM «мастер для дублей»; контекст, оценка его не использует.'
+      additionalProperties: false
+    SimilarIncidentSharedAttributes:
+      type: object
+      description: 'Совпавшие признаки, использованные оценкой; признак без вклада — null.'
+      required:
+        - productName
+        - service
+        - scenarioName
+        - errorCode
+      properties:
+        productName:
+          type: string
+        service:
+          type: string
+        scenarioName:
+          type:
+            - string
+            - 'null'
+        errorCode:
+          type:
+            - string
+            - 'null'
+          description: 'Значение атрибута `errorCode`, заданное и равное в обеих записях.'
       additionalProperties: false

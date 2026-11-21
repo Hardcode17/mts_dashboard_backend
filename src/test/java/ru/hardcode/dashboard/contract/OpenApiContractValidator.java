@@ -64,6 +64,7 @@ final class OpenApiContractValidator {
 	private static final String INGEST = "/api/integrations/itsm/batches";
 	private static final String DASHBOARD_INCIDENTS = "/api/dashboard/incidents";
 	private static final String DASHBOARD_CARD = "/api/dashboard/incidents/{incidentId}";
+	private static final String DASHBOARD_SIMILAR = "/api/dashboard/incidents/{incidentId}/similar";
 	private static final String DASHBOARD_SOURCES = "/api/dashboard/sources";
 	private static final String DASHBOARD_EVENTS = "/api/dashboard/events";
 	private static final String DASHBOARD_ACK = "/api/dashboard/events/ack";
@@ -549,6 +550,7 @@ final class OpenApiContractValidator {
 		canonical.put("listItsmUsers", "GET /api/dashboard/users");
 		canonical.put("updateIncidentCard", "PATCH " + DASHBOARD_CARD);
 		canonical.put("getIncidentCard", "GET " + DASHBOARD_CARD);
+		canonical.put("suggestSimilarIncidents", "GET " + DASHBOARD_SIMILAR);
 		canonical.put("listSources", "GET " + DASHBOARD_SOURCES);
 		canonical.put("pollEvents", "GET " + DASHBOARD_EVENTS);
 		canonical.put("acknowledgeEvents", "POST " + DASHBOARD_ACK);

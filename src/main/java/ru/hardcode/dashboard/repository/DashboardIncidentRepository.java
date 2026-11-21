@@ -22,6 +22,32 @@ public class DashboardIncidentRepository {
 			LEFT JOIN itsm_external_group AS team ON team.id = incident.assigned_group_id
 			""";
 
+	/** Published incidents with the attributes the KAN-42 similar-incident scoring reads. */
+	private static final String SCORING_FROM = """
+			FROM itsm_incident AS incident
+			JOIN itsm_snapshot_source AS source ON source.source_id = incident.source_id
+			    AND source.observed_version = incident.last_seen_version
+			JOIN itsm_catalog_product AS product ON product.id = incident.product_id
+			LEFT JOIN itsm_catalog_service AS service ON service.id = incident.service_id
+			LEFT JOIN itsm_catalog_scenario AS scenario ON scenario.id = incident.scenario_id
+			CROSS JOIN LATERAL (
+			    SELECT max(string_value) FILTER (WHERE attribute_name = 'header') AS header,
+			           max(string_value) FILTER (WHERE attribute_name = 'errorCode') AS error_code,
+			           bool_or(boolean_value) FILTER (WHERE attribute_name = 'isDouble') AS is_double,
+			           bool_or(boolean_value) FILTER (WHERE attribute_name = 'isMaster') AS is_master
+			    FROM itsm_incident_attribute
+			    WHERE incident_id = incident.id
+			      AND ((value_type = 'STRING' AND attribute_name IN ('header', 'errorCode'))
+			        OR (value_type = 'BOOLEAN' AND attribute_name IN ('isDouble', 'isMaster')))
+			) AS attributes
+			""";
+
+	private static final String SCORING_SELECT = """
+			SELECT incident.id, incident.service_id, service.service_key, product.product_key,
+			       scenario.scenario_key, incident.state, incident.priority_id, incident.submit_date,
+			       attributes.header, attributes.error_code, attributes.is_double, attributes.is_master
+			""";
+
 	private final JdbcClient jdbc;
 
 	public DashboardIncidentRepository(JdbcClient jdbc) {
@@ -90,6 +116,37 @@ public class DashboardIncidentRepository {
 				.optional();
 	}
 
+	public Optional<ScoringRow> findScoringRow(String incidentId) {
+		return jdbc.sql(SCORING_SELECT + SCORING_FROM + """
+				WHERE incident.present_in_source AND incident.id = :id
+				""").param("id", incidentId)
+				.query((rs, row) -> scoringRow(rs)).optional();
+	}
+
+	/**
+	 * Published incidents of one catalog service, registered in {@code [from, to]} and ordered by
+	 * id, so the similar-incident scoring of KAN-42 stays deterministic.
+	 */
+	public List<ScoringRow> findSimilarScoringRows(long serviceId, String excludedId, Instant from, Instant to) {
+		return jdbc.sql(SCORING_SELECT + SCORING_FROM + """
+				WHERE incident.present_in_source AND incident.id ~ '^INC[0-9]{6,18}$'
+				    AND incident.service_id = :service AND incident.id <> :excluded
+				    AND incident.submit_date BETWEEN :from AND :to
+				ORDER BY incident.id
+				""")
+				.param("service", serviceId).param("excluded", excludedId)
+				.param("from", Timestamp.from(from)).param("to", Timestamp.from(to))
+				.query((rs, row) -> scoringRow(rs)).list();
+	}
+
+	private static ScoringRow scoringRow(ResultSet rs) throws SQLException {
+		return new ScoringRow(rs.getString("id"), rs.getObject("service_id", Long.class), rs.getString("service_key"),
+				rs.getString("product_key"), rs.getString("scenario_key"),
+				ItsmIncidentState.valueOf(rs.getString("state")), rs.getInt("priority_id"),
+				instant(rs, "submit_date"), rs.getString("header"), rs.getString("error_code"),
+				rs.getObject("is_double", Boolean.class), rs.getObject("is_master", Boolean.class));
+	}
+
 	private static IncidentSummary summary(ResultSet rs) throws SQLException {
 		return new IncidentSummary(rs.getString("id"), rs.getString("product_key"), rs.getString("group_name"),
 				ItsmIncidentState.valueOf(rs.getString("state")), rs.getInt("priority_id"),
@@ -114,5 +171,11 @@ public class DashboardIncidentRepository {
 	public record CardRow(IncidentSummary summary, String header, String description, String productMasterId,
 			String service, String serviceType, String assignedEmployee, String assignedEmployeeLogin,
 			String stateReason, Instant lastAssignmentToTeamDateTime, String solution) {
+	}
+
+	/** One published incident with the fields the similar-incident scoring compares (KAN-42). */
+	public record ScoringRow(String id, Long serviceId, String serviceKey, String productKey, String scenarioKey,
+			ItsmIncidentState state, int priorityId, Instant submitDate, String header, String errorCode,
+			Boolean isDouble, Boolean isMaster) {
 	}
 }

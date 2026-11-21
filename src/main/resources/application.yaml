@@ -10,6 +10,10 @@ request-logging:
   log-request-body: false
 
 app:
+  cors:
+    # Browser origins of the SPA allowed to call /api/** (KAN-64). Defaults are the dev
+    # origins registered as redirect URIs of the dashboard-web Keycloak client.
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
   auth:
     human:
       # Blank keeps the existing demo chain for API routes except /api/me, which rejects all tokens.

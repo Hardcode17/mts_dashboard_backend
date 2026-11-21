@@ -35,8 +35,17 @@ public enum AppErrors implements AppError {
 	AUTH_REQUIRED("AUTH_REQUIRED", HttpStatus.UNAUTHORIZED, "Authentication is required"),
 	INVALID_GROUP("INVALID_GROUP", HttpStatus.BAD_REQUEST, "Unknown dashboard group ${group}"),
 	INVALID_CURSOR("INVALID_CURSOR", HttpStatus.BAD_REQUEST, "cursor is not a valid list cursor"),
-	INVALID_EVENT_SEQ("INVALID_EVENT_SEQ", HttpStatus.BAD_REQUEST, "afterEventSeq must be a non-negative event sequence number"),
+	// Shared by the KAN-28 incident change feed (afterEventSeq) and the KAN-25 shift queue
+	// (sinceEventSeq): the eventSeq cursor must be a non-negative 64-bit integer.
+	INVALID_EVENT_SEQ("INVALID_EVENT_SEQ", HttpStatus.BAD_REQUEST,
+			"afterEventSeq/sinceEventSeq must be a non-negative 64-bit integer"),
 	INVALID_LIMIT("INVALID_LIMIT", HttpStatus.BAD_REQUEST, "limit must be between 1 and 100"),
+	INVALID_EVENT_LIMIT("INVALID_EVENT_LIMIT", HttpStatus.BAD_REQUEST, "limit must be between 1 and 500"),
+	ACK_EVENTS_INVALID("ACK_EVENTS_INVALID", HttpStatus.BAD_REQUEST,
+			"eventIds must contain 1-1000 unique identifiers like evt-0001"),
+	ACK_EVENT_UNKNOWN("ACK_EVENT_UNKNOWN", HttpStatus.BAD_REQUEST, "Unknown eventId ${eventId}"),
+	ACK_EVENT_NOT_ALARM("ACK_EVENT_NOT_ALARM", HttpStatus.BAD_REQUEST,
+			"Event ${eventId} does not require acknowledgement"),
 	INVALID_INCIDENT_ID("INVALID_INCIDENT_ID", HttpStatus.BAD_REQUEST,
 			"incidentId must be an INC identifier such as INC000021095531"),
 	INCIDENT_NOT_FOUND("INCIDENT_NOT_FOUND", HttpStatus.NOT_FOUND, "Incident${incident} not found"),
