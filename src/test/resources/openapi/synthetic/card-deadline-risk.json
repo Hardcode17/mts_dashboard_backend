@@ -1,0 +1,50 @@
+{
+  "id": "INC000021095531",
+  "header": "Сбой приёма платежей на кассах",
+  "description": "Синтетическое описание для контрактных примеров KAN-20.",
+  "productName": "Оплата заказов",
+  "productMasterId": "BI_pay",
+  "service": "checkout-api",
+  "serviceType": "Клиентский",
+  "assignedGroupName": "КЦ ИТ Координаторы Массовых Инцидентов",
+  "assignedEmployee": "Тестовый исполнитель",
+  "stateEnum": "Assigned",
+  "stateReason": null,
+  "priorityId": 4,
+  "submitDate": "2026-11-21T09:00:00Z",
+  "lastAssignmentToTeamDateTime": "2026-11-21T09:00:00Z",
+  "deadline": "2026-11-21T12:00:00Z",
+  "completionDate": null,
+  "solution": null,
+  "remainingSeconds": 7200,
+  "overdue": false,
+  "itsmUrl": "http://127.0.0.1:8082/api/mock/incidents/INC000021095531",
+  "itsmDemo": true,
+  "groupMemberships": [
+    {
+      "group": "coordinator",
+      "matchedRule": "assignedToCoordinators"
+    },
+    {
+      "group": "critical",
+      "matchedRule": "priorityId = 4"
+    }
+  ],
+  "deadlineRisk": {
+    "risk": "high",
+    "evaluatedAt": "2026-11-21T10:00:00Z",
+    "reasons": [
+      {
+        "code": "remaining_below_threshold",
+        "text": "До дедлайна 2.0 ч, порог 32.9 ч"
+      },
+      {
+        "code": "group_median_exceeds",
+        "text": "Медиана группы решения «КЦ ИТ Координаторы Массовых Инцидентов»: 6.0 ч, остаток 2.0 ч"
+      }
+    ],
+    "score": null
+  },
+  "eventSeq": 43,
+  "revision": 42
+}

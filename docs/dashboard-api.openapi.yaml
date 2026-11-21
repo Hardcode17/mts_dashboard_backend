@@ -696,6 +696,13 @@ paths:
                     itsmUrl: 'http://127.0.0.1:8082/itsm_incident/INC000021931151/page'
                     itsmDemo: true
                     groupMemberships: []
+                    deadlineRisk:
+                      risk: high
+                      evaluatedAt: '2026-11-21T10:00:00Z'
+                      reasons:
+                        - code: remaining_below_threshold
+                          text: 'До дедлайна 26.0 ч, порог 32.9 ч'
+                      score: null
                     eventSeq: 2
                     revision: 1
         '400':
@@ -779,6 +786,14 @@ paths:
         из которой он построен. `itsmUrl` открывает ровно этот INC во внешней системе
         (или демоцель при `itsmDemo=true`). GET не меняет назначение, версию и историю и
         не выполняет запрос по ссылке.
+
+        `deadlineRisk` (KAN-82) — категория риска нарушения дедлайна с основаниями: пересчитывается
+        фоново при каждой публикации снимка ITSM для активных инцидентов со сроком. Продуктовое
+        правило по умолчанию — порог остатка времени (вердикт KAN-81: `остаток < N часов`,
+        N калиброван на UCI ServiceNow и пересчитывается на истории МТС); режим регрессии —
+        опциональный запасной, константы в конфигурации бэкенда, отдельного сервиса нет. Оценка
+        только читает данные и не меняет дедлайн, приоритет и статус; предупреждение о
+        приближении срока (KAN-46) показывается рядом и отдельно.
       parameters:
         - name: incidentId
           in: path
@@ -829,6 +844,13 @@ paths:
                         matchedRule: assignedToCoordinators
                       - group: critical
                         matchedRule: priorityId = 4
+                    deadlineRisk:
+                      risk: unknown
+                      evaluatedAt: '2026-11-21T10:00:00Z'
+                      reasons:
+                        - code: no_deadline
+                          text: У инцидента нет дедлайна — риск не оценивается
+                      score: null
                     eventSeq: 43
                     revision: 42
                 research:
@@ -861,6 +883,13 @@ paths:
                         matchedRule: assignedToCoordinators
                       - group: research
                         matchedRule: stateEnum = Research
+                    deadlineRisk:
+                      risk: unknown
+                      evaluatedAt: '2026-11-21T10:00:00Z'
+                      reasons:
+                        - code: not_active
+                          text: Карточка завершена — риск не оценивается
+                      score: null
                     eventSeq: 43
                     revision: 42
                 completed:
@@ -889,6 +918,54 @@ paths:
                     itsmUrl: 'http://127.0.0.1:8082/api/mock/incidents/INC000021095537'
                     itsmDemo: true
                     groupMemberships: []
+                    deadlineRisk:
+                      risk: unknown
+                      evaluatedAt: '2026-11-21T10:00:00Z'
+                      reasons:
+                        - code: not_active
+                          text: Карточка завершена — риск не оценивается
+                      score: null
+                    eventSeq: 43
+                    revision: 42
+                deadlineRiskHigh:
+                  summary: 'Активный P4 со сроком: высокий риск с основаниями (fixture card-deadline-risk)'
+                  x-fixture: card-deadline-risk
+                  value:
+                    id: INC000021095531
+                    header: Сбой приёма платежей на кассах
+                    description: Синтетическое описание для контрактных примеров KAN-20.
+                    productName: Оплата заказов
+                    productMasterId: BI_pay
+                    service: checkout-api
+                    serviceType: Клиентский
+                    assignedGroupName: КЦ ИТ Координаторы Массовых Инцидентов
+                    assignedEmployee: Тестовый исполнитель
+                    stateEnum: Assigned
+                    stateReason: null
+                    priorityId: 4
+                    submitDate: '2026-11-21T09:00:00Z'
+                    lastAssignmentToTeamDateTime: '2026-11-21T09:00:00Z'
+                    deadline: '2026-11-21T12:00:00Z'
+                    completionDate: null
+                    solution: null
+                    remainingSeconds: 7200
+                    overdue: false
+                    itsmUrl: 'http://127.0.0.1:8082/api/mock/incidents/INC000021095531'
+                    itsmDemo: true
+                    groupMemberships:
+                      - group: coordinator
+                        matchedRule: assignedToCoordinators
+                      - group: critical
+                        matchedRule: priorityId = 4
+                    deadlineRisk:
+                      risk: high
+                      evaluatedAt: '2026-11-21T10:00:00Z'
+                      reasons:
+                        - code: remaining_below_threshold
+                          text: 'До дедлайна 2.0 ч, порог 32.9 ч'
+                        - code: group_median_exceeds
+                          text: 'Медиана группы решения «КЦ ИТ Координаторы Массовых Инцидентов»: 6.0 ч, остаток 2.0 ч'
+                      score: null
                     eventSeq: 43
                     revision: 42
         '400':
@@ -1770,6 +1847,7 @@ components:
         - itsmUrl
         - itsmDemo
         - groupMemberships
+        - deadlineRisk
         - eventSeq
         - revision
       properties:
@@ -1864,10 +1942,62 @@ components:
           type: array
           items:
             $ref: '#/components/schemas/IncidentGroupMembership'
+        deadlineRisk:
+          $ref: '#/components/schemas/DeadlineRisk'
         eventSeq:
           $ref: '#/components/schemas/EventSeq'
         revision:
           $ref: '#/components/schemas/PublishedRevision'
+      additionalProperties: false
+    DeadlineRisk:
+      type: object
+      description: |
+        Риск нарушения дедлайна (KAN-82). Пересчитывается фоново при каждой публикации снимка
+        ITSM для активных инцидентов со сроком; отдельного сервиса нет, модель — константы в
+        конфигурации бэкенда. Продуктовое правило по умолчанию — порог остатка времени
+        (вердикт KAN-81: high при `остаток < N часов`, N = 32.92 калиброван на UCI ServiceNow и
+        пересчитывается на реальной истории МТС; medium в буферной зоне N..2N), режим регрессии —
+        опциональный запасной (`score = w0 + w1*x1 + … + w7*x7`). Оценка только читает данные и
+        не меняет дедлайн, приоритет и статус; предупреждение о приближении срока (KAN-46)
+        показывается рядом и отдельно. `risk: unknown` — срока нет, карточка завершена или
+        оценка недоступна; карточку не блокирует. `score` — только для отладки: в режиме
+        регрессии это сырое взвешенное сумма признаков (не вероятность), в пороговом режиме и
+        для `unknown` — `null`; в UI не показывать.
+      required:
+        - risk
+        - evaluatedAt
+        - reasons
+        - score
+      properties:
+        risk:
+          type: string
+          enum:
+            - low
+            - medium
+            - high
+            - unknown
+        evaluatedAt:
+          $ref: '#/components/schemas/UtcInstant'
+        reasons:
+          type: array
+          description: 'Основания оценки с конкретными числами; у `unknown` — причина недоступности.'
+          items:
+            type: object
+            required:
+              - code
+              - text
+            additionalProperties: false
+            properties:
+              code:
+                type: string
+                description: 'Стабильный код основания: `remaining_below_threshold`, `remaining_in_buffer`, `group_median_exceeds`, `deadline_extended`, `reassigned`, `reopened`, `status_stale`, `assignee_overloaded`, `no_deadline`, `no_history`, `not_active`, `not_evaluated`.'
+              text:
+                type: string
+        score:
+          type:
+            - number
+            - 'null'
+          description: 'Взвешенная сумма признаков режима регрессии; `null` в пороговом режиме и для `unknown`.'
       additionalProperties: false
     IncidentList:
       type: object

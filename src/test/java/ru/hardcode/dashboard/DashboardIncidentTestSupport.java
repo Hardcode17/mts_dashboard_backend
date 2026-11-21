@@ -63,7 +63,8 @@ abstract class DashboardIncidentTestSupport {
 		jdbc.execute("""
 				TRUNCATE itsm_ingest_batch, itsm_snapshot, itsm_snapshot_source, itsm_incident,
 				    itsm_catalog_product, itsm_catalog_service, itsm_catalog_scenario,
-				    itsm_external_group, itsm_external_person, itsm_ingest_catalog_hint CASCADE
+				    itsm_external_group, itsm_external_person, itsm_ingest_catalog_hint,
+				    deadline_risk CASCADE
 				""");
 		// The publication counters live in their own singleton row: they must not leak
 		// between tests when the batch and journal tables are truncated.
