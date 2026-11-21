@@ -89,7 +89,7 @@ services:
       ITSM_MOCK_TARGET_URL: ${ITSM_MOCK_TARGET_URL:-http://backend:8080/api/integrations/itsm/batches}
       ITSM_MOCK_TOKEN_URL: ${ITSM_MOCK_TOKEN_URL:-}
       ITSM_MOCK_CLIENT_ID: ${ITSM_MOCK_CLIENT_ID:-}
-      ITSM_MOCK_CLIENT_SECRET: ${ITSM_MOCK_CLIENT_SECRET:-}
+      ITSM_MOCK_CLIENT_SECRET: ${ITSM_MOCK_CLIENT_SECRET:-${STAND_ITSM_SENDER_SECRET:-}}
       ITSM_MOCK_SOURCE_ID: ${ITSM_MOCK_SOURCE_ID:-demo-itsm}
       ITSM_MOCK_INTERVAL: ${ITSM_MOCK_INTERVAL:-PT30S}
       ITSM_MOCK_SCHEDULED: ${ITSM_MOCK_SCHEDULED:-true}
@@ -106,6 +106,9 @@ services:
     depends_on:
       backend:
         condition: service_healthy
+      keycloak:
+        condition: service_healthy
+    restart: unless-stopped
 
 volumes:
   postgres-data:
