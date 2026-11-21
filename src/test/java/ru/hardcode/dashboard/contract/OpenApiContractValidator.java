@@ -552,6 +552,11 @@ final class OpenApiContractValidator {
 		canonical.put("listSources", "GET " + DASHBOARD_SOURCES);
 		canonical.put("pollEvents", "GET " + DASHBOARD_EVENTS);
 		canonical.put("acknowledgeEvents", "POST " + DASHBOARD_ACK);
+		String connections = "/api/dashboard/notification-connections";
+		canonical.put("listNotificationConnections", "GET " + connections);
+		canonical.put("createNotificationConnection", "POST " + connections);
+		canonical.put("getNotificationConnection", "GET " + connections + "/{id}");
+		canonical.put("updateNotificationConnection", "PUT " + connections + "/{id}");
 		canonical.forEach((operationId, route) -> {
 			List<String> found = routes.getOrDefault(operationId, List.of());
 			if (!found.equals(List.of(route))) {

@@ -8,6 +8,7 @@ info:
     Согласован в KAN-20 с приёмом снимков (`itsm-ingest.openapi.yaml`, KAN-27/KAN-53).
     Список и карточка читаются из опубликованных снимков. Для статуса источника, polling и
     подтверждений в этой спецификации пока приведены только примеры.
+    Спецификация также описывает личные подключения каналов уведомлений (KAN-36).
     Примеры синтетические (INC `INC0000210955xx` не пересекаются с реальной выгрузкой),
     валидируются схемами и пригодны фронту до готовности БД.
 
@@ -1155,6 +1156,231 @@ paths:
                 cookieAuthRequired:
                   summary: Нет сессии интерфейса
                   value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
+  /api/dashboard/notification-connections:
+    get:
+      operationId: listNotificationConnections
+      summary: Получить свои настройки уведомлений (KAN-36)
+      description: Возвращает все подключения координатора по возрастанию ID, включая выключенные.
+      security:
+        - coordinatorBearer: []
+      responses:
+        '200':
+          description: Личные подключения. Пустой список допустим.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NotificationConnection'
+              examples:
+                noConnections:
+                  summary: Настройки ещё не созданы
+                  value: []
+                emailP4:
+                  summary: Email для P4
+                  value:
+                    - { id: 12, channel: email, address: coordinator@example.test, active: true, priorityIds: [4] }
+        '401':
+          description: Нужен токен координатора.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                authenticationRequired:
+                  summary: Нет действительного токена
+                  value: { code: HUMAN_AUTH_REQUIRED, message: Human access token is required }
+        '403':
+          description: У пользователя нет локального допуска.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                coordinatorAccessDenied:
+                  summary: Нет допуска
+                  value: { code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted }
+    post:
+      operationId: createNotificationConnection
+      summary: Добавить личное подключение (KAN-36)
+      description: Можно создать несколько независимых подключений одного типа.
+      security:
+        - coordinatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationConnectionSettings' }
+            examples:
+              emailP4:
+                summary: Стендовое подключение для P4
+                value: { channel: email, address: coordinator@example.test, active: true, priorityIds: [4] }
+      responses:
+        '201':
+          description: Подключение создано.
+          headers:
+            Location:
+              description: Путь к созданному подключению.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationConnection'
+              examples:
+                created:
+                  summary: Сохранённое подключение
+                  value: { id: 12, channel: email, address: coordinator@example.test, active: true, priorityIds: [4] }
+        '400':
+          description: Неверные настройки или некорректный JSON.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                invalidSettings:
+                  summary: Неподдерживаемый приоритет
+                  value: { code: INVALID_NOTIFICATION_CONNECTION, message: Invalid notification connection settings }
+                invalidJson:
+                  summary: Неверный синтаксис запроса
+                  value: { code: INVALID_REQUEST_BODY, message: Request body is malformed or missing }
+        '401':
+          description: Нужен токен координатора.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                authenticationRequired:
+                  summary: Нет действительного токена
+                  value: { code: HUMAN_AUTH_REQUIRED, message: Human access token is required }
+        '403':
+          description: У пользователя нет локального допуска.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                coordinatorAccessDenied:
+                  summary: Нет допуска
+                  value: { code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted }
+  /api/dashboard/notification-connections/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+    get:
+      operationId: getNotificationConnection
+      summary: Получить личное подключение (KAN-36)
+      security:
+        - coordinatorBearer: []
+      responses:
+        '200':
+          description: Настройки подключения.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationConnection'
+              examples:
+                emailP4:
+                  summary: Текущее подключение для P4
+                  value: { id: 12, channel: email, address: coordinator@example.test, active: true, priorityIds: [4] }
+        '401':
+          description: Нужен токен координатора.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                authenticationRequired:
+                  summary: Нет действительного токена
+                  value: { code: HUMAN_AUTH_REQUIRED, message: Human access token is required }
+        '403':
+          description: У пользователя нет локального допуска.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                coordinatorAccessDenied:
+                  summary: Нет допуска
+                  value: { code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted }
+        '404':
+          description: Личное подключение не найдено.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                connectionNotFound:
+                  summary: Чужой или неизвестный ID
+                  value: { code: NOTIFICATION_CONNECTION_NOT_FOUND, message: Notification connection not found }
+    put:
+      operationId: updateNotificationConnection
+      summary: Сохранить настройки личного подключения (KAN-36)
+      description: |
+        Заменяет настройки и список приоритетов. При `active: false` подключение остаётся
+        в настройках, но исключается из маршрутизации. Пустой список приоритетов также
+        исключает его из маршрутизации. Опущенный `secretRef` сохраняет прежнюю ссылку,
+        если тип канала тот же. `secretRef: null` удаляет ссылку.
+      security:
+        - coordinatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationConnectionSettings' }
+            examples:
+              disableEmail:
+                summary: Выключить подключение для P4
+                value: { channel: email, address: coordinator@example.test, active: false, priorityIds: [4] }
+      responses:
+        '200':
+          description: Настройки сохранены.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationConnection'
+              examples:
+                disabled:
+                  summary: Выключенное подключение
+                  value: { id: 12, channel: email, address: coordinator@example.test, active: false, priorityIds: [4] }
+        '400':
+          description: Неверные настройки или некорректный JSON.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                invalidSettings:
+                  summary: Неподдерживаемый приоритет
+                  value: { code: INVALID_NOTIFICATION_CONNECTION, message: Invalid notification connection settings }
+                invalidJson:
+                  summary: Неверный синтаксис запроса
+                  value: { code: INVALID_REQUEST_BODY, message: Request body is malformed or missing }
+        '401':
+          description: Нужен токен координатора.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                authenticationRequired:
+                  summary: Нет действительного токена
+                  value: { code: HUMAN_AUTH_REQUIRED, message: Human access token is required }
+        '403':
+          description: У пользователя нет локального допуска.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                coordinatorAccessDenied:
+                  summary: Нет допуска
+                  value: { code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted }
+        '404':
+          description: Личное подключение не найдено.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                connectionNotFound:
+                  summary: Чужой или неизвестный ID
+                  value: { code: NOTIFICATION_CONNECTION_NOT_FOUND, message: Notification connection not found }
+
 components:
   securitySchemes:
     coordinatorBearer:
@@ -1176,6 +1402,56 @@ components:
         Проверяются `iss`, подпись JWKS, `exp`, `aud`; остальное — как `machineBearer` в
         `itsm-ingest.openapi.yaml`.
   schemas:
+    NotificationChannel:
+      type: string
+      enum: [email, sms, push, telegram, mattermost, max, mts_link, mobile_hub, mts_notifica]
+    NotificationAddress:
+      type: string
+      pattern: '^[a-zA-Z0-9@+_.-]{1,254}$'
+      description: Синтетический адрес или идентификатор стенда.
+      examples: [coordinator@example.test]
+    NotificationPriorityIds:
+      type: array
+      uniqueItems: true
+      maxItems: 4
+      items:
+        type: integer
+        enum: [1, 2, 3, 4]
+    NotificationConnectionSettings:
+      type: object
+      additionalProperties: false
+      required: [channel, address, active, priorityIds]
+      properties:
+        channel:
+          $ref: '#/components/schemas/NotificationChannel'
+        address:
+          $ref: '#/components/schemas/NotificationAddress'
+        active:
+          type: boolean
+        priorityIds:
+          $ref: '#/components/schemas/NotificationPriorityIds'
+        secretRef:
+          type: [string, 'null']
+          pattern: '^[A-Z][A-Z0-9_]{0,99}$'
+          writeOnly: true
+          description: Имя секрета в окружении. В теле запроса передаётся только имя.
+    NotificationConnection:
+      type: object
+      additionalProperties: false
+      required: [id, channel, address, active, priorityIds]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        channel:
+          $ref: '#/components/schemas/NotificationChannel'
+        address:
+          $ref: '#/components/schemas/NotificationAddress'
+        active:
+          type: boolean
+        priorityIds:
+          $ref: '#/components/schemas/NotificationPriorityIds'
     IncidentId:
       type: string
       pattern: '^INC[0-9]{6,18}$'
