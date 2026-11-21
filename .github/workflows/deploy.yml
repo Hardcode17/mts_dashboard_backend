@@ -23,6 +23,7 @@ jobs:
       BACKEND_ENV_FILE: ${{ vars.BACKEND_ENV_FILE || '/home/gha-runner/.config/mts-dashboard-backend/runtime.env' }}
       STAND_KEYCLOAK_URL: ${{ vars.STAND_KEYCLOAK_URL }}
       STAND_FRONTEND_URL: ${{ vars.STAND_FRONTEND_URL }}
+      STAND_ENABLE_ITSM_MOCK: ${{ vars.STAND_ENABLE_ITSM_MOCK || 'false' }}
     defaults:
       run:
         shell: bash
@@ -61,6 +62,10 @@ jobs:
             -v login=coordinator -v display_name='Координатор' \
             -f - < scripts/grant-coordinator.sql
           echo "Admitted coordinator (sub=$subject) for $issuer"
+
+      - name: Start stand ITSM mock and verify two fresh snapshots
+        if: env.STAND_ENABLE_ITSM_MOCK == 'true'
+        run: bash scripts/deploy-stand-itsm.sh
 
       - name: Show deployment status
         run: docker compose --env-file "$BACKEND_ENV_FILE" ps
