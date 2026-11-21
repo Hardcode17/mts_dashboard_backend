@@ -62,7 +62,7 @@ class DeadlineRiskIT extends DashboardIncidentTestSupport {
 		return """
 				{"id":"INC0000100007","stateEnum":"Assigned","priorityId":4,
 				 "submitDate":"2026-11-21T12:02:29Z","productName":"Test product",
-				 "assignedGroupName":"Support","assignedEmployee":"%s","deadline":"%s"}
+				 "assignedGroupName":"Support","assignedEmployee":"%s","deadline":"%s","solution":null}
 				""".formatted(assignee, deadline);
 	}
 
@@ -132,7 +132,7 @@ class DeadlineRiskIT extends DashboardIncidentTestSupport {
 		// Registered exactly at the fixed test clock: x5 (hours without a status change) is 0.
 		return """
 				{"id":"%s","stateEnum":"Assigned","priorityId":4,"submitDate":"2026-11-21T12:02:29Z",
-				 "productName":"Test product","assignedGroupName":"Support"%s}
+				 "productName":"Test product","assignedGroupName":"Support","solution":null%s}
 				""".formatted(id, deadline == null ? "" : ",\"deadline\":\"" + deadline + "\"");
 	}
 

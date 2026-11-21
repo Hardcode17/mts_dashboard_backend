@@ -19,13 +19,13 @@ class DeadlineRiskScorerTest {
 	@Test
 	void sumsTheWeightedFeaturesAndCategorizesByConfiguredThresholds() {
 		// x1 = 6/2 = 3, x2 = 1, x3 = 2, x4 = 1, x5 = 30, x6 = 7, x7 = 4:
-		// score = -1 + 3 + 1 + 2*0.5 + 1 + 30*0.05 + 7*0.1 + 4*0.25 = 7.2 >= high(1.0).
+		// score = -1 + 3 + 1 + 2*0.5 + 1 + 30*0.05 + 7*0.1 + 4*0.25 = 8.2 >= high(1.0).
 		var result = scorer.evaluate(new DeadlineRiskInput("Support",
 				Instant.parse("2026-11-21T12:00:00Z"), NOW, 6.0, 1, 2, 1,
 				Duration.ofHours(30), 7, 4));
 
 		assertThat(result.risk()).isEqualTo(DeadlineRiskLevel.HIGH);
-		assertThat(result.score()).isCloseTo(7.2, offset(1e-9));
+		assertThat(result.score()).isCloseTo(8.2, offset(1e-9));
 		assertThat(result.reasons()).extracting(DeadlineRiskResult.Reason::code).containsExactly(
 				"group_median_exceeds", "deadline_extended", "reassigned", "reopened",
 				"status_stale", "assignee_overloaded");

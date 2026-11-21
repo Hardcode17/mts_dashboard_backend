@@ -101,6 +101,8 @@ abstract class DashboardIncidentTestSupport {
 		var worker = new ItsmWorkerTransactionService(new ItsmWorkerSqlRepository(jdbc), transactions);
 		assertThat(worker.claimAndProcess(publication, "dashboard-test").batchId()).isEqualTo(batchId);
 		assertThat(jdbc.queryForObject("SELECT status FROM itsm_ingest_batch WHERE id = ?", String.class, batchId))
+				.as("batch diagnostic: %s",
+						jdbc.queryForObject("SELECT diagnostic FROM itsm_ingest_batch WHERE id = ?", String.class, batchId))
 				.isEqualTo("SUCCEEDED");
 	}
 
