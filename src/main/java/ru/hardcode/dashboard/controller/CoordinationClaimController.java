@@ -11,31 +11,31 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
-import ru.hardcode.dashboard.dto.CoordinationTaskResponse;
+import ru.hardcode.dashboard.dto.CoordinationClaimResponse;
 import ru.hardcode.dashboard.dto.CoordinationWindowResponse;
 import ru.hardcode.dashboard.service.CoordinatorAccessService;
-import ru.hardcode.dashboard.service.CoordinationTaskService;
+import ru.hardcode.dashboard.service.CoordinationClaimService;
 
 @RestController
 @RequestMapping("/api/dashboard/coordination-tasks")
-public class CoordinationTaskController {
+public class CoordinationClaimController {
 
 	private final CoordinatorAccessService access;
-	private final CoordinationTaskService service;
+	private final CoordinationClaimService service;
 
-	public CoordinationTaskController(CoordinatorAccessService access, CoordinationTaskService service) {
+	public CoordinationClaimController(CoordinatorAccessService access, CoordinationClaimService service) {
 		this.access = access;
 		this.service = service;
 	}
 
 	@GetMapping("/mine")
-	public ResponseEntity<List<CoordinationTaskResponse>> mine(Authentication auth) {
+	public ResponseEntity<List<CoordinationClaimResponse>> mine(Authentication auth) {
 		return ResponseEntity.ok().cacheControl(CacheControl.noStore())
 				.body(service.mine(access.requireActiveUser(auth).id()));
 	}
 
 	@PostMapping("/{taskId}/claim")
-	public CoordinationTaskResponse claim(@PathVariable long taskId, Authentication auth) {
+	public CoordinationClaimResponse claim(@PathVariable long taskId, Authentication auth) {
 		return service.claim(taskId, access.requireActiveUser(auth).id());
 	}
 
@@ -45,7 +45,7 @@ public class CoordinationTaskController {
 	}
 
 	@PostMapping("/{taskId}/fullscreen-window/{windowId}/accept")
-	public CoordinationTaskResponse accept(@PathVariable long taskId, @PathVariable UUID windowId,
+	public CoordinationClaimResponse accept(@PathVariable long taskId, @PathVariable UUID windowId,
 			Authentication auth) {
 		return service.accept(taskId, windowId, access.requireActiveUser(auth).id());
 	}

@@ -9,35 +9,35 @@ import java.util.UUID;
 
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import ru.hardcode.dashboard.dto.CoordinationTaskResponse;
+import ru.hardcode.dashboard.dto.CoordinationClaimResponse;
 import ru.hardcode.dashboard.dto.CoordinationWindowResponse;
 import ru.hardcode.dashboard.exception.AppErrors;
 import ru.hardcode.dashboard.exception.AppException;
-import ru.hardcode.dashboard.repository.CoordinationTaskRepository;
-import ru.hardcode.dashboard.repository.CoordinationTaskRepository.Assignment;
-import ru.hardcode.dashboard.repository.CoordinationTaskRepository.OpenTask;
+import ru.hardcode.dashboard.repository.CoordinationClaimRepository;
+import ru.hardcode.dashboard.repository.CoordinationClaimRepository.Assignment;
+import ru.hardcode.dashboard.repository.CoordinationClaimRepository.OpenTask;
 
 @Service
-public class CoordinationTaskService {
+public class CoordinationClaimService {
 
 	private static final int CRITICAL_PRIORITY = 4;
 	private static final long WINDOW_SECONDS = 60;
 
-	private final CoordinationTaskRepository repository;
+	private final CoordinationClaimRepository repository;
 	private final Clock clock;
 
-	public CoordinationTaskService(CoordinationTaskRepository repository, Clock clock) {
+	public CoordinationClaimService(CoordinationClaimRepository repository, Clock clock) {
 		this.repository = repository;
 		this.clock = clock;
 	}
 
 	@Transactional(readOnly = true)
-	public List<CoordinationTaskResponse> mine(long actor) {
-		return repository.mine(actor).stream().map(CoordinationTaskService::response).toList();
+	public List<CoordinationClaimResponse> mine(long actor) {
+		return repository.mine(actor).stream().map(CoordinationClaimService::response).toList();
 	}
 
 	@Transactional
-	public CoordinationTaskResponse claim(long taskId, long actor) {
+	public CoordinationClaimResponse claim(long taskId, long actor) {
 		OpenTask task = lockForActor(taskId, actor);
 		return response(task.coordinatorId() != null ? task.assignment() : repository.claim(task, actor, now(), null));
 	}
@@ -54,7 +54,7 @@ public class CoordinationTaskService {
 	}
 
 	@Transactional
-	public CoordinationTaskResponse accept(long taskId, UUID windowId, long actor) {
+	public CoordinationClaimResponse accept(long taskId, UUID windowId, long actor) {
 		OpenTask task = lockForActor(taskId, actor);
 		var window = repository.window(taskId, actor)
 				.filter(row -> row.windowId().equals(windowId))
@@ -91,8 +91,8 @@ public class CoordinationTaskService {
 		return clock.instant().truncatedTo(ChronoUnit.MICROS).atOffset(ZoneOffset.UTC);
 	}
 
-	private static CoordinationTaskResponse response(Assignment task) {
-		return new CoordinationTaskResponse(task.id(), task.incidentId(), task.coordinatorId(),
+	private static CoordinationClaimResponse response(Assignment task) {
+		return new CoordinationClaimResponse(task.id(), task.incidentId(), task.coordinatorId(),
 				task.acceptedAt() == null ? null : task.acceptedAt().toInstant());
 	}
 }

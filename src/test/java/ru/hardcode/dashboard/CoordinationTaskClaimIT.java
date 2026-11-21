@@ -29,7 +29,7 @@ import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 import ru.hardcode.dashboard.client.Kan16JwtTestConfiguration;
 import ru.hardcode.dashboard.client.TestJwtSigner;
-import ru.hardcode.dashboard.service.CoordinationTaskService;
+import ru.hardcode.dashboard.service.CoordinationClaimService;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -173,7 +173,7 @@ class CoordinationTaskClaimIT {
 						"--spring.datasource.url=" + pool.getJdbcUrl(),
 						"--spring.datasource.username=" + pool.getUsername(),
 						"--spring.datasource.password=" + pool.getPassword())) {
-			var persisted = restarted.getBean(CoordinationTaskService.class).show(task, userId(FIRST));
+			var persisted = restarted.getBean(CoordinationClaimService.class).show(task, userId(FIRST));
 			assertThat(persisted.windowId().toString()).isEqualTo(window);
 			assertThat(persisted.expiresAt()).isEqualTo(EXPIRES);
 		}

@@ -9,11 +9,11 @@ import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public class CoordinationTaskRepository {
+public class CoordinationClaimRepository {
 
 	private final JdbcClient jdbc;
 
-	public CoordinationTaskRepository(JdbcClient jdbc) {
+	public CoordinationClaimRepository(JdbcClient jdbc) {
 		this.jdbc = jdbc;
 	}
 
