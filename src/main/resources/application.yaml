@@ -1,10 +1,25 @@
 spring:
   application:
     name: dashboard
+  security:
+    user:
+      name: user
 
 request-logging:
   max-cached-body-size: 1MB
   log-request-body: false
+
+itsm:
+  intake:
+    max-outstanding-batches: ${ITSM_INTAKE_MAX_OUTSTANDING_BATCHES:1000}
+    stale-after: ${ITSM_INTAKE_STALE_AFTER:PT90S}
+  integration:
+    auth:
+      issuer: ${ITSM_INTEGRATION_AUTH_ISSUER:}
+      jwk-set-uri: ${ITSM_INTEGRATION_AUTH_JWK_SET_URI:}
+      audience: ${ITSM_INTEGRATION_AUTH_AUDIENCE:}
+      client-id: ${ITSM_INTEGRATION_AUTH_CLIENT_ID:}
+      import-role: ${ITSM_INTEGRATION_AUTH_IMPORT_ROLE:itsm:import}
 
 logging:
   file:
