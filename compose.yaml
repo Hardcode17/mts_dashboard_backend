@@ -44,7 +44,8 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN_USERNAME:-admin}
       KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?Runtime file must contain KEYCLOAK_ADMIN_PASSWORD}
-      KC_HOSTNAME: ${STAND_KEYCLOAK_URL:?Set STAND_KEYCLOAK_URL to the browser-reachable Keycloak origin}
+      KC_HOSTNAME: ${STAND_KEYCLOAK_URL:?Set STAND_KEYCLOAK_URL to the browser-reachable Keycloak base URL}
+      KC_PROXY_HEADERS: xforwarded
       KC_HEALTH_ENABLED: "true"
     volumes:
       - type: bind
@@ -55,7 +56,7 @@ services:
           create_host_path: false
       - keycloak-data:/opt/keycloak/data/h2
     ports:
-      - "8084:8080"
+      - "127.0.0.1:8084:8080"
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n' >&3 && grep -q '\"UP\"' <&3"]

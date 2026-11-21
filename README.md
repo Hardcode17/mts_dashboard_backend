@@ -108,14 +108,35 @@ CORS-origins браузерного SPA задаются `APP_CORS_ALLOWED_ORIGI
 
 ## Стендовый Keycloak в продакшен-деплое
 
-`compose.yaml` бэкенда включает сервис `keycloak` (порт 8084 наружу, браузер должен
-его достигать). Для деплоя задайте переменные репозитория в
+`compose.yaml` бэкенда поднимает Keycloak на `127.0.0.1:8084` на Raspberry Pi.
+Для публичного стенда прокси на Pi принимает HTTPS через Tailscale Funnel.
+Для деплоя задайте переменные репозитория в
 Settings → Secrets and variables → Actions → Variables:
 
-- `STAND_KEYCLOAK_URL` — origin Keycloak, доступный из браузера, без слэша в конце
-  (например `http://192.168.0.10:8084`);
+- `STAND_KEYCLOAK_URL` — публичный базовый URL Keycloak без слэша в конце
+  (например `https://raspberrypi.tail029aee.ts.net/auth`);
 - `STAND_FRONTEND_URL` — опубликованный origin фронтенда
-  (например `http://192.168.0.10:8080`).
+  (например `https://raspberrypi.tail029aee.ts.net`).
+
+При размещении Keycloak под `/auth` прокси направляет
+`/auth/realms/dashboard/` и `/auth/resources/` на `http://127.0.0.1:8084`,
+удаляя префикс `/auth`. Остальные пути `/auth/`, включая Admin API и realm
+`master`, должны возвращать 404. Пример для Nginx на Pi за Funnel:
+
+```nginx
+location ~ ^/auth(/(?:realms/dashboard|resources)/.*)$ {
+    rewrite ^/auth(/.*)$ $1 break;
+    proxy_pass http://127.0.0.1:8084;
+    proxy_set_header Host $host;
+    proxy_set_header X-Forwarded-Host $host;
+    proxy_set_header X-Forwarded-Proto https;
+    proxy_set_header X-Forwarded-Port 443;
+    proxy_set_header X-Forwarded-For $remote_addr;
+}
+location /auth/ {
+    return 404;
+}
+```
 
 `scripts/prepare-runtime.sh` рендерит realm через `scripts/render-realm.py`: пользователь
 `coordinator` с паролем из `STAND_COORDINATOR_PASSWORD` runtime-файла, redirect URI
@@ -126,7 +147,10 @@ Settings → Secrets and variables → Actions → Variables:
 SPA получает CORS на `/api/**`; машинный приём `/api/integrations/itsm/**` CORS не получает.
 Схема подключения — [docs/spa-access.md](docs/spa-access.md).
 
-После деплоя workflow сам выдаёт координатору локальный допуск через
+После запуска контейнеров workflow получает ID координатора через локальный
+Admin API и выдаёт допуск для публичного issuer. Realm импортируется один раз.
+Если фронтенд сменил origin после первого запуска, обновите redirect URI,
+web origin и post-logout redirect URI клиента `dashboard-web` в Keycloak.
 
 ### Загрузка тестового снимка
 
