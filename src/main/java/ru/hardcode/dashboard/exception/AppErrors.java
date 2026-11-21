@@ -20,7 +20,9 @@ public enum AppErrors implements AppError {
 	ITSM_INTAKE_QUEUE_FULL("ITSM_INTAKE_QUEUE_FULL", HttpStatus.TOO_MANY_REQUESTS, "ITSM intake queue is full (${max} outstanding batches)"),
 	ITSM_BATCH_NOT_FOUND("ITSM_BATCH_NOT_FOUND", HttpStatus.NOT_FOUND, "ITSM batch ${batchId} not found"),
 	ITSM_MACHINE_AUTH_REQUIRED("ITSM_MACHINE_AUTH_REQUIRED", HttpStatus.UNAUTHORIZED, "Machine bearer token is required"),
-	ITSM_MACHINE_ACCESS_DENIED("ITSM_MACHINE_ACCESS_DENIED", HttpStatus.FORBIDDEN, "Machine client identity or itsm import permission is missing");
+	ITSM_MACHINE_ACCESS_DENIED("ITSM_MACHINE_ACCESS_DENIED", HttpStatus.FORBIDDEN, "Machine client identity or itsm import permission is missing"),
+	HUMAN_AUTH_REQUIRED("HUMAN_AUTH_REQUIRED", HttpStatus.UNAUTHORIZED, "Human access token is required"),
+	HUMAN_ACCESS_DENIED("HUMAN_ACCESS_DENIED", HttpStatus.FORBIDDEN, "The access token does not grant access to this resource");
 
 	private final String code;
 	private final HttpStatus httpStatus;

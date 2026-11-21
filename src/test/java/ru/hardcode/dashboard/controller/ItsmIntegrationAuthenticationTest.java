@@ -59,7 +59,12 @@ class ItsmIntegrationAuthenticationTest {
 
 	@Test
 	void postWithoutToken_returns401() throws Exception {
-		mockMvc.perform(postBatch(UUID.randomUUID(), "[]"))
+		mockMvc.perform(post(BATCH_PATH)
+						.contentType(MediaType.APPLICATION_JSON)
+						.header(ItsmBatchController.IDEMPOTENCY_KEY_HEADER, UUID.randomUUID())
+						.header(ItsmBatchController.SOURCE_ID_HEADER, SOURCE_ID)
+						.header(ItsmBatchController.SOURCE_VERSION_HEADER, SOURCE_VERSION)
+						.content("[]"))
 				.andExpect(status().isUnauthorized())
 				.andExpect(header().string(HttpHeaders.WWW_AUTHENTICATE, "Bearer realm=\"itsm-integration\""))
 				.andExpect(jsonPath("$.code").value("ITSM_MACHINE_AUTH_REQUIRED"))

@@ -1,20 +1,16 @@
 package ru.hardcode.dashboard.configuration;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 
-import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.annotation.Order;
 import org.springframework.core.convert.converter.Converter;
 import org.springframework.http.HttpHeaders;
-import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AbstractAuthenticationToken;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -26,8 +22,6 @@ import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import ru.hardcode.dashboard.configuration.ItsmMachineJwtConfiguration.MachineDecoder;
-import ru.hardcode.dashboard.dto.AppErrorResponse;
-import ru.hardcode.dashboard.exception.AppError;
 import ru.hardcode.dashboard.exception.AppErrors;
 import tools.jackson.databind.ObjectMapper;
 
@@ -40,6 +34,8 @@ import tools.jackson.databind.ObjectMapper;
 public class ItsmIntegrationSecurityConfiguration {
 
 	private static final String INTEGRATION_PATH = "/api/integrations/itsm/**";
+	// Kept from KAN-27: the machine 401 challenge is unchanged by the human API (KAN-16).
+	static final String MACHINE_REALM = "itsm-integration";
 
 	@Bean
 	@Order(1)
@@ -49,7 +45,8 @@ public class ItsmIntegrationSecurityConfiguration {
 			ItsmIntegrationAuthProperties properties,
 			ObjectMapper objectMapper
 	) throws Exception {
-		AuthenticationEntryPoint authenticationEntryPoint = machineAuthenticationEntryPoint(objectMapper);
+		AuthenticationEntryPoint authenticationEntryPoint = new StrictBearerAuthenticationEntryPoint(
+				objectMapper, AppErrors.ITSM_MACHINE_AUTH_REQUIRED, MACHINE_REALM);
 		AccessDeniedHandler accessDeniedHandler = machineAccessDeniedHandler(objectMapper);
 		Converter<Jwt, AbstractAuthenticationToken> authenticationConverter =
 				machineAuthenticationConverter(properties);
@@ -112,26 +109,8 @@ public class ItsmIntegrationSecurityConfiguration {
 		return false;
 	}
 
-	private static AuthenticationEntryPoint machineAuthenticationEntryPoint(ObjectMapper objectMapper) {
-		return (request, response, exception) -> {
-			response.setHeader(HttpHeaders.WWW_AUTHENTICATE, "Bearer realm=\"itsm-integration\"");
-			writeError(response, objectMapper, AppErrors.ITSM_MACHINE_AUTH_REQUIRED);
-		};
-	}
-
 	private static AccessDeniedHandler machineAccessDeniedHandler(ObjectMapper objectMapper) {
 		return (request, response, exception) ->
-				writeError(response, objectMapper, AppErrors.ITSM_MACHINE_ACCESS_DENIED);
-	}
-
-	private static void writeError(HttpServletResponse response, ObjectMapper objectMapper, AppError error)
-			throws IOException {
-		response.setStatus(error.getHttpStatus().value());
-		response.setContentType(MediaType.APPLICATION_JSON_VALUE);
-		response.setCharacterEncoding(StandardCharsets.UTF_8.name());
-		objectMapper.writeValue(
-				response.getOutputStream(),
-				new AppErrorResponse(error.getCode(), error.getMessage())
-		);
+				ApiErrorWriter.write(response, objectMapper, AppErrors.ITSM_MACHINE_ACCESS_DENIED);
 	}
 }

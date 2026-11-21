@@ -9,6 +9,16 @@ request-logging:
   max-cached-body-size: 1MB
   log-request-body: false
 
+app:
+  auth:
+    human:
+      # Blank keeps the existing demo chain for API routes except /api/me, which rejects all tokens.
+      issuer: ${APP_AUTH_HUMAN_ISSUER:}
+      issuer-uri: ${APP_AUTH_HUMAN_ISSUER_URI:}
+      jwk-set-uri: ${APP_AUTH_HUMAN_JWK_SET_URI:}
+      audience: ${APP_AUTH_HUMAN_AUDIENCE:}
+      clock-skew: ${APP_AUTH_HUMAN_CLOCK_SKEW:PT30S}
+
 itsm:
   intake:
     max-outstanding-batches: ${ITSM_INTAKE_MAX_OUTSTANDING_BATCHES:1000}

@@ -48,6 +48,9 @@ dependencies {
 	testImplementation("org.springframework.ai:spring-ai-spring-boot-testcontainers")
 	testImplementation("org.testcontainers:testcontainers-elasticsearch")
 	testImplementation("org.testcontainers:testcontainers-junit-jupiter")
+	// Keycloak is not part of the Testcontainers BOM; community module with its own coordinates
+	// (package dasniko.testcontainers.keycloak) built for Testcontainers 2.x.
+	testImplementation("com.github.dasniko:testcontainers-keycloak:4.4.0")
 	testImplementation("org.testcontainers:testcontainers-postgresql")
 	testCompileOnly("org.projectlombok:lombok")
 	testRuntimeOnly("org.junit.platform:junit-platform-launcher")
@@ -68,5 +71,11 @@ tasks.processResources {
 	from("docs") {
 		include("*.openapi.yaml")
 		into("static/openapi")
+	}
+}
+
+tasks.processTestResources {
+	from("src/keycloak/realm") {
+		into("keycloak/realm")
 	}
 }

@@ -10,6 +10,11 @@ import org.springframework.security.web.SecurityFilterChain;
 @Configuration
 public class HealthSecurityConfiguration {
 
+	/**
+	 * Default chain for health and local browser pages. {@code /health} is open and the rest
+	 * keeps the original form login and HTTP Basic rules for local access. The API itself is
+	 * handled by the ordered Bearer JWT chains above ({@code /api/**}).
+	 */
 	@Bean
 	SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
 		return http

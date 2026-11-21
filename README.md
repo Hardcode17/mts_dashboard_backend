@@ -125,3 +125,31 @@ sh ./gradlew :itsm-mock:test :itsm-mock:bootJar
 `SnapshotHttpIT` проверяет реальные HTTP-запросы на локальном приёмнике.
 `SnapshotContainerIT` повторяет проверку с контейнерным приёмником и требует
 работающего Docker.
+
+
+### Локальный вход через Keycloak
+
+`compose.auth.yaml` поднимает отдельный стенд. Укажите `AUTH_REALM_FILE` вне
+репозитория и передайте через окружение `DASHBOARD_TEST_USERNAME`,
+`DASHBOARD_TEST_EMAIL`, `DASHBOARD_TEST_PASSWORD` и `ITSM_SENDER_CLIENT_SECRET`.
+Подготовьте realm на Java 21 и запустите стенд:
+
+```sh
+umask 077
+java scripts/RenderRealm.java src/keycloak/realm/dashboard-realm.json "$AUTH_REALM_FILE"
+docker compose -f compose.auth.yaml up -d --build
+```
+
+Для Compose также нужны `KEYCLOAK_ADMIN_PASSWORD` и `AUTH_POSTGRES_PASSWORD`.
+При нестандартном порте Keycloak передайте `KEYCLOAK_PORT` в Compose и тот же
+адрес через `KEYCLOAK_PUBLIC_URL` в скрипт получения токена.
+
+```sh
+token="$(bash scripts/fetch-human-token.sh)"
+curl -fsS -H "Authorization: Bearer $token" http://localhost:8091/api/me
+unset token
+```
+
+`subject` в ответе — значение `sub` из проверенного JWT. Для импорта используется
+отдельный клиент `itsm-sender` и аудитория `itsm-ingest`. Проверка в Docker
+выполняется командой `sh ./gradlew :test --tests '*HumanApiSecurityIT'`.

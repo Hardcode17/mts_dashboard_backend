@@ -1,0 +1,160 @@
+{
+  "realm": "dashboard",
+  "displayName": "MTS Dashboard (local test fixture)",
+  "enabled": true,
+  "registrationAllowed": false,
+  "registrationEmailAsUsername": false,
+  "resetPasswordAllowed": false,
+  "rememberMe": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "editUsernameAllowed": false,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "accessTokenLifespan": 300,
+  "accessCodeLifespan": 60,
+  "defaultRole": {
+    "name": "default-roles-dashboard",
+    "description": "Realm default role",
+    "composite": true,
+    "clientRole": false,
+    "composites": {
+      "realm": ["offline_access", "uma_authorization"]
+    }
+  },
+  "roles": {
+    "realm": [
+      {
+        "name": "dashboard-user",
+        "description": "Human user of the dashboard"
+      },
+      {
+        "name": "itsm:import",
+        "description": "May import ITSM snapshots. Granted only to the itsm-sender service account, never to dashboard-users"
+      }
+    ],
+    "client": {
+      "itsm-sender": [
+        {
+          "name": "itsm:import",
+          "description": "Client-scoped variant of the import permission. Humans never receive it; the machine grants it through its realm role"
+        }
+      ]
+    }
+  },
+  "groups": [
+    {
+      "name": "dashboard-users",
+      "path": "/dashboard-users",
+      "realmRoles": ["dashboard-user"]
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-itsm-sender",
+      "enabled": true,
+      "serviceAccountClientId": "itsm-sender",
+      "realmRoles": ["itsm:import"]
+    },
+    {
+      "username": "__DASHBOARD_TEST_USERNAME__",
+      "firstName": "Local",
+      "lastName": "Test",
+      "email": "__DASHBOARD_TEST_EMAIL__",
+      "enabled": true,
+      "emailVerified": true,
+      "attributes": {
+        "locale": ["en"]
+      },
+      "credentials": [
+        {
+          "type": "password",
+          "value": "__DASHBOARD_TEST_PASSWORD__",
+          "temporary": false
+        }
+      ],
+      "groups": ["/dashboard-users"],
+      "requiredActions": []
+    }
+  ],
+  "clients": [
+    {
+      "clientId": "dashboard-api",
+      "description": "Audience of human access tokens for the backend API (bearer-only, not a login client)",
+      "enabled": true,
+      "bearerOnly": true,
+      "publicClient": false,
+      "protocol": "openid-connect"
+    },
+    {
+      "clientId": "dashboard-web",
+      "name": "MTS Dashboard web (Authorization Code + PKCE)",
+      "description": "Public SPA client. Login is Authorization Code with PKCE only; no direct grants.",
+      "enabled": true,
+      "publicClient": true,
+      "protocol": "openid-connect",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:3000/*",
+        "http://localhost:5173/*"
+      ],
+      "webOrigins": [
+        "http://localhost:3000",
+        "http://localhost:5173"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "audience-dashboard-api",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "dashboard-api",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
+      "defaultClientScopes": ["basic", "profile", "email", "roles"],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "itsm-sender",
+      "name": "ITCS ITSM sender (client credentials)",
+      "description": "Confidential machine client for snapshot import. No human login, no human roles.",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "__ITSM_SENDER_CLIENT_SECRET__",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+          "name": "audience-itsm-ingest",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "itsm-ingest",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
+      "defaultClientScopes": ["basic", "service_account", "roles"],
+      "optionalClientScopes": []
+    }
+  ]
+}
