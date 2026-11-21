@@ -7,30 +7,34 @@ import java.util.List;
 import java.util.Locale;
 
 /**
- * KAN-82 deadline risk scoring: a logistic-regression-shaped weighted sum of features read at
- * evaluation time, with category thresholds. The model is the configured constants — no training
- * and no ML runtime; real coefficients arrive from the offline KAN-81 notebook as a config edit.
+ * KAN-82 deadline risk scoring, driven entirely by the configured constants — no training and
+ * no ML runtime. Real numbers arrive from the offline KAN-81 notebook as a config edit.
  *
- * <p>score = w0 + w1*x1 + … + w7*x7, where
- * x1 — median resolution time of the resolution group divided by the hours left until the
- *      deadline (the main "similar tasks" feature),
- * x2 — deadline extensions observed so far,
- * x3 — group/assignee reassignments observed so far,
- * x4 — reopenings observed so far,
- * x5 — hours without a status change,
- * x6 — open incidents of the assignee,
- * x7 — the original ITSM priority (1–4).
+ * <p>Two modes, selected by {@code deadline-risk.mode}. The product default is
+ * {@code regression} (the team's deliberate choice of the feature-aware forecast; its weights,
+ * category thresholds and feature clamps reproduce {@code tools/deadline_risk_weights.json}
+ * without standardization, and it is retrained on real MTS history by the KAN-81 script):
+ * <ul>
+ * <li>{@code regression}: score = w0 + w1*x1 + … + w7*x7 with category thresholds. x1 — median
+ * resolution time of the resolution group divided by the hours left, x2 — deadline extensions,
+ * x3 — reassignments, x4 — reopenings, x5 — hours without a status change, x6 — assignee's
+ * open incidents, x7 — the ITSM priority; every feature is clamped to the bounds fixed
+ * offline. The score is the raw weighted sum, never a probability. Without a usable group
+ * median the main feature is missing and the assessment yields {@code unknown} rather than
+ * silently degrading.</li>
+ * <li>{@code threshold} (the fallback): the KAN-81 winning baseline — risk is high when less
+ * than {@code deadline-risk.threshold-hours} remain until the deadline, medium inside the
+ * buffer zone, low above it. The rule needs only the deadline, so a missing group median never
+ * blocks the assessment.</li>
+ * </ul>
  *
- * <p>The score is the raw weighted sum, never a probability. An incident without a deadline, a
- * resolution group or a usable group median is not scored: the result is
- * {@link DeadlineRiskLevel#UNKNOWN} with an explanatory reason, and the card keeps working. The
- * scorer only reads ITSM data; it never changes the deadline, priority or state, and it does not
- * replace the remaining-time warning of KAN-46.
+ * <p>An incident without a deadline is never scored: the result is
+ * {@link DeadlineRiskLevel#UNKNOWN} with an explanatory reason, and the card keeps working. In
+ * the regression mode a missing group median also yields {@code unknown}: the main feature would
+ * be unavailable. The scorer only reads ITSM data; it never changes the deadline, priority or
+ * state, and it does not replace the remaining-time warning of KAN-46.
  */
 public class DeadlineRiskScorer {
-
-	/** Floor for the deadline remainder so a passed deadline cannot divide by zero. */
-	static final double MIN_REMAINING_HOURS = 0.05;
 
 	private final DeadlineRiskProperties properties;
 
@@ -43,6 +47,43 @@ public class DeadlineRiskScorer {
 			return DeadlineRiskResult.unknown(List.of(new DeadlineRiskResult.Reason("no_deadline",
 					"У инцидента нет дедлайна — риск не оценивается")));
 		}
+		double remaining = remainingHours(input.evaluatedAt(), input.deadline());
+		return properties.mode() == DeadlineRiskProperties.Mode.REGRESSION
+				? evaluateRegression(input, remaining)
+				: evaluateThreshold(input, remaining);
+	}
+
+	/**
+	 * The fallback rule, marginally sharper on the UCI test (F1 0.778 vs 0.769): the remaining
+	 * time itself is the strongest signal there. The median comparison is added as an extra
+	 * ground whenever the group history exists — the badge must explain why the risk is high,
+	 * unlike the plain KAN-46 countdown.
+	 */
+	private DeadlineRiskResult evaluateThreshold(DeadlineRiskInput input, double remaining) {
+		var reasons = new ArrayList<DeadlineRiskResult.Reason>();
+		DeadlineRiskLevel risk;
+		if (remaining < properties.thresholdHours()) {
+			risk = DeadlineRiskLevel.HIGH;
+			reasons.add(new DeadlineRiskResult.Reason("remaining_below_threshold",
+					"До дедлайна %s ч, порог %s ч".formatted(hours(remaining), hours(properties.thresholdHours()))));
+		} else if (remaining < properties.bufferHours()) {
+			risk = DeadlineRiskLevel.MEDIUM;
+			reasons.add(new DeadlineRiskResult.Reason("remaining_in_buffer",
+					"До дедлайна %s ч, буфер %s ч".formatted(hours(remaining), hours(properties.bufferHours()))));
+		} else {
+			risk = DeadlineRiskLevel.LOW;
+		}
+		addMedianGround(input, remaining, reasons);
+		return new DeadlineRiskResult(risk, null, reasons);
+	}
+
+	/**
+	 * KAN-81 logistic regression without standardization — the product default: the team
+	 * deliberately prefers the feature-aware forecast; every feature is clamped to the offline
+	 * bounds before the weighted sum. Without a usable group median the main feature is missing
+	 * and the assessment is {@code unknown} rather than silently degraded.
+	 */
+	private DeadlineRiskResult evaluateRegression(DeadlineRiskInput input, double remaining) {
 		if (input.assignedGroupName() == null) {
 			return DeadlineRiskResult.unknown(List.of(new DeadlineRiskResult.Reason("no_history",
 					"Карточка без назначенной группы — медиана решения недоступна")));
@@ -52,34 +93,26 @@ public class DeadlineRiskScorer {
 					("Нет завершённых карточек группы «%s» — медиана решения недоступна")
 							.formatted(input.assignedGroupName()))));
 		}
+		var regression = properties.regression();
+		var clamps = regression.clamps();
+		double x1 = clamp(input.medianResolutionHours()
+				/ Math.max(remaining, regression.minRemainingHours()), clamps.x1());
+		double x2 = clamp(Math.max(input.deadlineExtensions(), 0), clamps.x2());
+		double x3 = clamp(Math.max(input.reassignments(), 0), clamps.x3());
+		double x4 = clamp(Math.max(input.reopenings(), 0), clamps.x4());
+		double x5 = clamp(staleHours(input.timeSinceStatusChange()), clamps.x5());
+		double x6 = clamp(Math.max(input.assigneeOpenIncidents(), 0), clamps.x6());
+		double x7 = clamp(input.priorityId(), clamps.x7());
 
-		double remaining = remainingHours(input.evaluatedAt(), input.deadline());
-		double median = input.medianResolutionHours();
-		double x1 = median / Math.max(remaining, MIN_REMAINING_HOURS);
-		double x2 = Math.max(input.deadlineExtensions(), 0);
-		double x3 = Math.max(input.reassignments(), 0);
-		double x4 = Math.max(input.reopenings(), 0);
-		double x5 = staleHours(input.timeSinceStatusChange());
-		double x6 = Math.max(input.assigneeOpenIncidents(), 0);
-		double x7 = input.priorityId();
-
-		var weights = properties.weights();
+		var weights = regression.weights();
 		double score = weights.w0() + weights.w1() * x1 + weights.w2() * x2 + weights.w3() * x3
 				+ weights.w4() * x4 + weights.w5() * x5 + weights.w6() * x6 + weights.w7() * x7;
-		DeadlineRiskLevel risk = score >= properties.thresholds().high() ? DeadlineRiskLevel.HIGH
-				: score >= properties.thresholds().medium() ? DeadlineRiskLevel.MEDIUM
+		DeadlineRiskLevel risk = score >= regression.thresholds().high() ? DeadlineRiskLevel.HIGH
+				: score >= regression.thresholds().medium() ? DeadlineRiskLevel.MEDIUM
 						: DeadlineRiskLevel.LOW;
-		return new DeadlineRiskResult(risk, score, reasons(input, median, remaining, x2, x3, x4, x5, x6));
-	}
 
-	private List<DeadlineRiskResult.Reason> reasons(DeadlineRiskInput input, double median,
-			double remaining, double x2, double x3, double x4, double x5, double x6) {
 		var reasons = new ArrayList<DeadlineRiskResult.Reason>();
-		if (median > remaining) {
-			reasons.add(new DeadlineRiskResult.Reason("group_median_exceeds",
-					("Медиана группы решения «%s»: %s ч, до дедлайна %s ч").formatted(
-							input.assignedGroupName(), hours(median), hours(Math.max(remaining, 0)))));
-		}
+		addMedianGround(input, remaining, reasons);
 		if (x2 >= 1) {
 			reasons.add(new DeadlineRiskResult.Reason("deadline_extended",
 					"Дедлайн уже продлевался %d %s".formatted((long) x2, times((long) x2))));
@@ -103,9 +136,20 @@ public class DeadlineRiskScorer {
 		if (reasons.isEmpty()) {
 			reasons.add(new DeadlineRiskResult.Reason("group_median",
 					"Медиана группы решения «%s»: %s ч, до дедлайна %s ч".formatted(
-							input.assignedGroupName(), hours(median), hours(Math.max(remaining, 0)))));
+							input.assignedGroupName(), hours(input.medianResolutionHours()), hours(remaining))));
 		}
-		return reasons;
+		return new DeadlineRiskResult(risk, score, reasons);
+	}
+
+	/** The group-median ground of both modes: similar cards took longer than the time left. */
+	private static void addMedianGround(DeadlineRiskInput input, double remaining,
+			List<DeadlineRiskResult.Reason> reasons) {
+		if (input.assignedGroupName() != null && input.medianResolutionHours() != null
+				&& input.medianResolutionHours() > remaining) {
+			reasons.add(new DeadlineRiskResult.Reason("group_median_exceeds",
+					("Медиана группы решения «%s»: %s ч, остаток %s ч").formatted(input.assignedGroupName(),
+							hours(input.medianResolutionHours()), hours(Math.max(remaining, 0)))));
+		}
 	}
 
 	private static double remainingHours(Instant evaluatedAt, Instant deadline) {
@@ -117,6 +161,10 @@ public class DeadlineRiskScorer {
 			return 0;
 		}
 		return timeSinceStatusChange.toMillis() / 3_600_000.0;
+	}
+
+	private static double clamp(double value, DeadlineRiskProperties.Clamp bounds) {
+		return Math.min(Math.max(value, bounds.min()), bounds.max());
 	}
 
 	private static String hours(double value) {

@@ -33,26 +33,45 @@ dashboard:
     read-timeout: ${DASHBOARD_ITSM_READ_TIMEOUT:PT5S}
 
 deadline-risk:
-  # KAN-82 model constants. PLACEHOLDER values: real coefficients and thresholds come from the
-  # offline KAN-81 training (UCI ServiceNow) and replace these numbers as a single config edit —
-  # the code never changes between trainings.
-  # score = w0 + w1*x1 + … + w7*x7 with x1 = service × priority × group median resolution hours
-  # (falling back to group × priority, then group when history is missing) / hours left until
-  # the deadline, x2 = deadline extensions, x3 = reassignments, x4 = reopenings,
-  # x5 = hours without a status change, x6 = assignee's open incidents, x7 = priorityId (1-4).
-  weights:
-    w0: -1.0
-    w1: 1.0
-    w2: 1.0
-    w3: 0.5
-    w4: 1.0
-    w5: 0.05
-    w6: 0.1
-    w7: 0.25
-  # Category boundaries on the raw score: >= high is high, >= medium is medium, otherwise low.
-  thresholds:
-    medium: 0.0
-    high: 1.0
+  # KAN-82 model constants. Product decision: the feature-aware regression is the DEFAULT mode —
+  # the team deliberately prefers the smart forecast (reassignments, stuck cards, assignee load,
+  # group history) even though the plain threshold is marginally sharper on the UCI test
+  # (F1 0.778 vs 0.769); the weights are retrained on real MTS history by the KAN-81 script.
+  # The plain remaining-time threshold stays the simple fallback mode.
+  mode: regression
+  # Fallback mode (deadline-risk.mode: threshold): high when less than this many hours remain
+  # until the deadline. Calibrated on UCI ServiceNow (KAN-81 baseline A, N = 32.92); recompute
+  # on real MTS history.
+  threshold-hours: 32.92
+  # Fallback mode: medium inside the (threshold, buffer) zone, low above it. Default 2*N.
+  buffer-hours: 65.84
+  regression:
+    # Default mode (deadline-risk.mode: regression): KAN-81 logistic regression without
+    # standardization, reproduced from tools/deadline_risk_weights.json.
+    weights:
+      w0: 4.379061
+      w1: 0.010472
+      w2: 0.167612
+      w3: -0.030004
+      w4: 0.42397
+      w5: 0.033348
+      w6: 0.007605
+      w7: -2.089877
+    # Category boundaries on the raw score, tuned on train for a ~20% false-positive budget.
+    thresholds:
+      medium: -1.286237
+      high: -0.913755
+    # Feature bounds fixed by the offline notebook; the scorer clamps every feature to them.
+    clamps:
+      x1: {min: 0.0, max: 100.0}
+      x2: {min: 0.0, max: 200.0}
+      x3: {min: 0.0, max: 50.0}
+      x4: {min: 0.0, max: 20.0}
+      x5: {min: 0.0, max: 2160.0}
+      x6: {min: 0.0, max: 100.0}
+      x7: {min: 1.0, max: 4.0}
+    # Floor for the deadline remainder in x1 so a passed deadline cannot divide by zero.
+    min-remaining-hours: 0.25
   # When a feature becomes a named reason of the assessment.
   reasons:
     stale-status-hours: 24

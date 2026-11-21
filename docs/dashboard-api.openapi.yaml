@@ -1951,10 +1951,11 @@ components:
       description: |
         Риск нарушения дедлайна (KAN-82). Пересчитывается фоново при каждой публикации снимка
         ITSM для активных инцидентов со сроком; отдельного сервиса нет, модель — константы в
-        конфигурации бэкенда. Оценка только читает данные и не меняет дедлайн, приоритет и
+        конфигурации бэкенда. По умолчанию работает регрессия KAN-81. Режим threshold
+        оценивает оставшееся время до дедлайна. Оценка только читает данные и не меняет дедлайн, приоритет и
         статус; предупреждение о приближении срока (KAN-46) показывается рядом и отдельно.
         `risk: unknown` — срока нет, карточка завершена или оценка недоступна; карточку не
-        блокирует. `score` — сырое взвешенное сумма признаков (не вероятность), только для
+        блокирует. `score` — взвешенная сумма признаков (не вероятность), только для
         отладки, в UI не показывать.
       required:
         - risk
@@ -1983,14 +1984,14 @@ components:
             properties:
               code:
                 type: string
-                description: 'Стабильный код основания: `group_median`, `group_median_exceeds`, `deadline_extended`, `reassigned`, `reopened`, `status_stale`, `assignee_overloaded`, `no_deadline`, `no_history`, `not_active`, `not_evaluated`.'
+                description: 'Стабильный код основания: `remaining_below_threshold`, `remaining_in_buffer`, `group_median`, `group_median_exceeds`, `deadline_extended`, `reassigned`, `reopened`, `status_stale`, `assignee_overloaded`, `no_deadline`, `no_history`, `not_active`, `not_evaluated`.'
               text:
                 type: string
         score:
           type:
             - number
             - 'null'
-          description: 'Взвешенная сумма признаков `w0 + w1*x1 + … + w7*x7`; `null` для `unknown`.'
+          description: 'Взвешенная сумма признаков `w0 + w1*x1 + … + w7*x7`; `null` для `unknown` и режима threshold.'
       additionalProperties: false
     IncidentList:
       type: object

@@ -41,7 +41,7 @@ class DeadlineRiskServiceTest {
 
 	@BeforeEach
 	void setUp() {
-		service = new DeadlineRiskService(repository, new DeadlineRiskScorer(new DeadlineRiskProperties(null, null, null)),
+		service = new DeadlineRiskService(repository, new DeadlineRiskScorer(new DeadlineRiskProperties(null, null, null, null, null)),
 				Clock.fixed(NOW, ZoneOffset.UTC), new ObjectMapper());
 	}
 
@@ -66,14 +66,14 @@ class DeadlineRiskServiceTest {
 
 		// Service 1, priority 4 and Support use the exact median over both group fallbacks.
 		var scoped = captured.get(0);
-		assertThat(scoped.risk()).isEqualTo(DeadlineRiskLevel.HIGH);
-		assertThat(scoped.score()).isEqualTo(-1.0 + 6.0 + 0.05 + 1.0);
+		assertThat(scoped.risk()).isEqualTo(DeadlineRiskLevel.LOW);
+		assertThat(scoped.score()).isEqualTo(4.379061 + 0.010472 * 6 + 0.033348 - 2.089877 * 4);
 		assertThat(scoped.evaluatedAt()).isEqualTo(NOW);
 
 		// Priority 3 of Support has no scoped median and falls back to the group-wide 42 h.
 		var fallback = captured.get(1);
-		assertThat(fallback.risk()).isEqualTo(DeadlineRiskLevel.HIGH);
-		assertThat(fallback.score()).isEqualTo(-1.0 + 42.0 / 2.0 + 0.05 + 0.25 * 3);
+		assertThat(fallback.risk()).isEqualTo(DeadlineRiskLevel.LOW);
+		assertThat(fallback.score()).isEqualTo(4.379061 + 0.010472 * 21 + 0.033348 - 2.089877 * 3);
 
 		// No completed history for a group keeps the incident readable as unknown.
 		var unknown = captured.get(3);
@@ -92,7 +92,7 @@ class DeadlineRiskServiceTest {
 
 		ArgumentCaptor<List<ScoredRisk>> stored = ArgumentCaptor.forClass(List.class);
 		verify(repository).replaceAll(stored.capture());
-		assertThat(stored.getValue().getFirst().score()).isEqualTo(-1.0 + 12.0 + 0.05 + 1.0);
+		assertThat(stored.getValue().getFirst().score()).isEqualTo(4.379061 + 0.010472 * 12 + 0.033348 - 2.089877 * 4);
 	}
 
 	@Test

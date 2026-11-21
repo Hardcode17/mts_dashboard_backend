@@ -6,7 +6,7 @@ import org.springframework.context.annotation.Configuration;
 
 /**
  * KAN-82 wiring: the model constants from {@code deadline-risk.*} and the pure scorer built from
- * them. Replacing the placeholder weights with the trained KAN-81 coefficients is a config edit;
+ * them. Updating the trained KAN-81 coefficients is a config edit;
  * no code changes between trainings.
  */
 @Configuration(proxyBeanMethods = false)
