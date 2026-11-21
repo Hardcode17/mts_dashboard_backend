@@ -1314,6 +1314,177 @@ paths:
                 cookieAuthRequired:
                   summary: Нет сессии интерфейса
                   value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
+  /api/dashboard/incidents/changes:
+    get:
+      operationId: listIncidentChanges
+      summary: Прочитать события по общему курсору (KAN-28, KAN-46)
+      description: Общий порядок по eventSeq. Для следующей страницы передать полученный lastEventSeq.
+      security: [{coordinatorBearer: []}]
+      parameters:
+        - {name: afterEventSeq, in: query, schema: {type: integer, format: int64, minimum: 0, default: 0}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+      responses:
+        '200':
+          description: Журнал изменений ITSM и локальных событий.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentChangesPage'}
+              examples:
+                deadlineWarning:
+                  summary: Предупреждение о сроке
+                  value: {events: [{eventSeq: 44, eventId: local-44, incidentId: INC000021095531, sourceId: null, sourceVersion: null, changeRevision: 42, changeKind: DEADLINE_APPROACHING, observedAt: '2026-11-21T13:45:00Z', sourceTime: null, fields: [], details: {deadline: '2026-11-21T14:00:00Z', ruleVersion: 1}}], hasMore: false, lastEventSeq: 44}
+        '401':
+          description: Требуется токен координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Требуется токен координатора.
+                  value: {code: AUTH_REQUIRED, message: Authentication is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Нет допуска координатора.
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+  '/api/dashboard/incidents/{incidentId}/history':
+    get:
+      operationId: getIncidentHistory
+      summary: Прочитать общую хронологию INC (KAN-28, KAN-46)
+      security: [{coordinatorBearer: []}]
+      parameters:
+        - {name: incidentId, in: path, required: true, schema: {$ref: '#/components/schemas/IncidentId'}}
+      responses:
+        '200':
+          description: События INC по eventSeq и время последнего наблюдения ITSM.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentHistory'}
+              examples:
+                deadlineWarning:
+                  summary: Локальное событие в хронологии
+                  value: {incidentId: INC000021095531, lastObservedAt: '2026-11-21T13:41:00Z', events: [{eventSeq: 44, eventId: local-44, incidentId: INC000021095531, sourceId: null, sourceVersion: null, changeRevision: 42, changeKind: DEADLINE_APPROACHING, observedAt: '2026-11-21T13:45:00Z', sourceTime: null, fields: [], details: {deadline: '2026-11-21T14:00:00Z', ruleVersion: 1}}]}
+        '401':
+          description: Требуется токен координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Требуется токен координатора.
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Нет допуска координатора.
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+        '404':
+          description: Неизвестный INC.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentNotFound'}
+              examples:
+                error:
+                  summary: Неизвестный INC.
+                  value: {code: INCIDENT_NOT_FOUND, message: Incident INC000021095531 not found, eventSeq: 43, revision: 42}
+  /api/dashboard/deadline-warning-rule:
+    get:
+      operationId: getDeadlineWarningRule
+      summary: Прочитать порог предупреждения о сроке (KAN-46)
+      security: [{coordinatorBearer: []}]
+      responses:
+        '200':
+          description: Сохранённый порог в секундах и его версия.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeadlineWarningRule'}
+              examples:
+                rule:
+                  summary: Порог 15 минут
+                  value: {thresholdSeconds: 900, version: 1}
+        '401':
+          description: Требуется токен координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Требуется токен координатора.
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Нет допуска координатора.
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+    put:
+      operationId: setDeadlineWarningRule
+      summary: Настроить порог предупреждения о сроке (KAN-46)
+      description: Версия увеличивается при изменении порога. Повтор значения сохраняет версию.
+      security: [{coordinatorBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [thresholdSeconds]
+              properties:
+                thresholdSeconds: {type: integer, format: int32, minimum: 1, maximum: 2147483647}
+            examples:
+              threshold:
+                summary: Порог 10 минут
+                value: {thresholdSeconds: 600}
+      responses:
+        '200':
+          description: Сохранённое правило.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeadlineWarningRule'}
+              examples:
+                updated:
+                  summary: Новая версия порога
+                  value: {thresholdSeconds: 600, version: 2}
+        '400':
+          description: Некорректный порог.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Некорректный порог.
+                  value: {code: INVALID_DEADLINE_WARNING_RULE, message: thresholdSeconds must be a positive 32-bit integer}
+        '401':
+          description: Требуется токен координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Требуется токен координатора.
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Нет допуска координатора.
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+
 components:
   securitySchemes:
     coordinatorBearer:
@@ -1335,6 +1506,63 @@ components:
         Проверяются `iss`, подпись JWKS, `exp`, `aud`; остальное — как `machineBearer` в
         `itsm-ingest.openapi.yaml`.
   schemas:
+    IncidentChangesPage:
+      type: object
+      required: [events, hasMore, lastEventSeq]
+      properties:
+        events: {type: array, items: {$ref: '#/components/schemas/IncidentJournalEvent'}}
+        hasMore: {type: boolean}
+        lastEventSeq: {type: integer, format: int64, minimum: 0}
+    IncidentHistory:
+      type: object
+      required: [incidentId, lastObservedAt, events]
+      properties:
+        incidentId: {$ref: '#/components/schemas/IncidentId'}
+        lastObservedAt:
+          anyOf:
+            - {$ref: '#/components/schemas/UtcInstant'}
+            - {type: 'null'}
+        events: {type: array, items: {$ref: '#/components/schemas/IncidentJournalEvent'}}
+    IncidentJournalEvent:
+      type: object
+      required: [eventSeq, incidentId, sourceId, sourceVersion, changeRevision, changeKind, observedAt, sourceTime, fields]
+      properties:
+        eventSeq: {type: integer, format: int64, minimum: 1}
+        eventId: {type: string, pattern: '^local-[0-9]+$', description: Стабильный идентификатор локального события.}
+        incidentId: {$ref: '#/components/schemas/IncidentId'}
+        sourceId: {type: [string, 'null'], description: Источник ITSM. У локального события null.}
+        sourceVersion: {type: [integer, 'null'], format: int64}
+        changeRevision: {type: integer, format: int64, minimum: 0}
+        changeKind:
+          type: string
+          enum: [ADDED, UPDATED, MISSING, RETURNED, NOTE_ADDED, DEADLINE_APPROACHING]
+        observedAt: {$ref: '#/components/schemas/UtcInstant'}
+        sourceTime:
+          anyOf:
+            - {$ref: '#/components/schemas/UtcInstant'}
+            - {type: 'null'}
+        fields:
+          type: array
+          description: Пусто у локальных событий.
+          items:
+            type: object
+            required: [field, previous, current]
+            properties:
+              field: {type: string}
+              previous: {}
+              current: {}
+        details:
+          type: object
+          description: Данные локального события. DEADLINE_APPROACHING передаёт deadline и ruleVersion.
+          properties:
+            deadline: {$ref: '#/components/schemas/UtcInstant'}
+            ruleVersion: {type: integer, format: int64, minimum: 1}
+    DeadlineWarningRule:
+      type: object
+      required: [thresholdSeconds, version]
+      properties:
+        thresholdSeconds: {type: integer, format: int32, minimum: 1}
+        version: {type: integer, format: int64, minimum: 1}
     IncidentId:
       type: string
       pattern: '^INC[0-9]{6,18}$'

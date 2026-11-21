@@ -39,6 +39,8 @@ public enum AppErrors implements AppError {
 	// (sinceEventSeq): the eventSeq cursor must be a non-negative 64-bit integer.
 	INVALID_EVENT_SEQ("INVALID_EVENT_SEQ", HttpStatus.BAD_REQUEST,
 			"afterEventSeq/sinceEventSeq must be a non-negative 64-bit integer"),
+	INVALID_DEADLINE_WARNING_RULE("INVALID_DEADLINE_WARNING_RULE", HttpStatus.BAD_REQUEST,
+			"thresholdSeconds must be a positive 32-bit integer"),
 	INVALID_LIMIT("INVALID_LIMIT", HttpStatus.BAD_REQUEST, "limit must be between 1 and 100"),
 	INVALID_EVENT_LIMIT("INVALID_EVENT_LIMIT", HttpStatus.BAD_REQUEST, "limit must be between 1 and 500"),
 	ACK_EVENTS_INVALID("ACK_EVENTS_INVALID", HttpStatus.BAD_REQUEST,

@@ -550,6 +550,10 @@ final class OpenApiContractValidator {
 		canonical.put("listItsmUsers", "GET /api/dashboard/users");
 		canonical.put("updateIncidentCard", "PATCH " + DASHBOARD_CARD);
 		canonical.put("getIncidentCard", "GET " + DASHBOARD_CARD);
+		canonical.put("listIncidentChanges", "GET " + DASHBOARD_INCIDENTS + "/changes");
+		canonical.put("getIncidentHistory", "GET " + DASHBOARD_CARD + "/history");
+		canonical.put("getDeadlineWarningRule", "GET /api/dashboard/deadline-warning-rule");
+		canonical.put("setDeadlineWarningRule", "PUT /api/dashboard/deadline-warning-rule");
 		canonical.put("suggestSimilarIncidents", "GET " + DASHBOARD_SIMILAR);
 		canonical.put("listSources", "GET " + DASHBOARD_SOURCES);
 		canonical.put("pollEvents", "GET " + DASHBOARD_EVENTS);

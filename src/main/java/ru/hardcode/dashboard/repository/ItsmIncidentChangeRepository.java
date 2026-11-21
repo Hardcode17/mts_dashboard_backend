@@ -18,9 +18,15 @@ import org.springframework.stereotype.Repository;
 public class ItsmIncidentChangeRepository {
 
 	private static final String COLUMNS = """
-			SELECT event_seq, source_id, incident_id, source_version, change_revision, change_kind,
-			       observed_at, source_time, before_data, after_data
-			FROM itsm_incident_change
+			SELECT * FROM (
+			    SELECT event_seq, source_id, incident_id, source_version, change_revision, change_kind,
+			           observed_at, source_time, before_data, after_data, NULL::jsonb AS details
+			    FROM itsm_incident_change
+			    UNION ALL
+			    SELECT event_seq, NULL, incident_id, NULL, change_revision, kind,
+			           observed_at, NULL, NULL, NULL, details
+			    FROM local_incident_event
+			) AS journal
 			""";
 
 	private final JdbcTemplate jdbc;
@@ -46,9 +52,9 @@ public class ItsmIncidentChangeRepository {
 
 	private static JournalRow row(ResultSet rs, int rowNum) throws SQLException {
 		return new JournalRow(rs.getLong("event_seq"), rs.getString("source_id"), rs.getString("incident_id"),
-				rs.getLong("source_version"), rs.getLong("change_revision"), rs.getString("change_kind"),
+				rs.getObject("source_version", Long.class), rs.getLong("change_revision"), rs.getString("change_kind"),
 				instant(rs, "observed_at"), instant(rs, "source_time"),
-				rs.getString("before_data"), rs.getString("after_data"));
+				rs.getString("before_data"), rs.getString("after_data"), rs.getString("details"));
 	}
 
 	private static Instant instant(ResultSet rs, String column) throws SQLException {
@@ -56,8 +62,8 @@ public class ItsmIncidentChangeRepository {
 		return value == null ? null : value.toInstant();
 	}
 
-	public record JournalRow(long eventSeq, String sourceId, String incidentId, long sourceVersion,
+	public record JournalRow(long eventSeq, String sourceId, String incidentId, Long sourceVersion,
 			long changeRevision, String changeKind, Instant observedAt, Instant sourceTime,
-			String beforeData, String afterData) {
+			String beforeData, String afterData, String details) {
 	}
 }
