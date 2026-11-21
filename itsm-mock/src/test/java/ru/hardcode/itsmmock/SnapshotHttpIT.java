@@ -3,6 +3,7 @@ package ru.hardcode.itsmmock;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
@@ -63,6 +64,8 @@ class SnapshotHttpIT {
 
     @Test
     void manualScheduledRetryRejectionAndRestart() throws Exception {
+        mvc.perform(get("/itsm_incident")).andExpect(status().isOk()).andExpect(jsonPath("$[0].sysId").isString());
+        mvc.perform(get("/user")).andExpect(status().isOk()).andExpect(jsonPath("$[0].login").value("demo0"));
         CODES.addAll(List.of(429, 503, 202));
         mvc.perform(post("/api/mock/emit")).andExpect(status().isOk())
                 .andExpect(jsonPath("$.deliveredVersion").value(1));
@@ -132,6 +135,29 @@ class SnapshotHttpIT {
         assertThat(restarted.status().deliveredVersion()).isEqualTo(4);
         assertThat(restarted.status().paused()).isTrue();
         mvc.perform(get("/api/mock/status")).andExpect(status().isOk());
+        String api = "/itsm_incident/" + initial.get(0).get("sysId").asString();
+        mvc.perform(get("/itsm_incident/missing/page")).andExpect(status().isNotFound())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().contentTypeCompatibleWith("text/html"));
+        mvc.perform(get("/itsm_incident/missing")).andExpect(status().isNotFound()).andExpect(jsonPath("$.code").isString());
+        mvc.perform(patch("/itsm_incident/missing").contentType("application/json").content("{}")).andExpect(status().isNotFound());
+        for (String changes : List.of("{}", "{\"stateEnum\":\"bad\"}","{\"assignedGroupName\":\" \"}","{\"userId\":\"nobody\"}")) {
+            mvc.perform(patch(api).contentType("application/json").content(changes)).andExpect(status().isBadRequest());
+        }
+        mvc.perform(patch(api).contentType("application/json").content("""
+                {"assignedEmployeeLogin":"demo1","assignedGroupName":"New group","stateEnum":"Resolved","solution":"Restored"}
+                """)).andExpect(status().isOk()).andExpect(jsonPath("$.completionDate").isString())
+                .andExpect(jsonPath("$.solution").value("Restored")).andExpect(jsonPath("$.stateId").value(7));
+        mvc.perform(get(api+"/page")).andExpect(status().isOk())
+                .andExpect(org.springframework.test.web.servlet.result.MockMvcResultMatchers.content().string(org.hamcrest.Matchers.containsString("New group")));
+        mvc.perform(patch(api).contentType("application/json").content("{\"stateId\":2}")).andExpect(status().isOk())
+                .andExpect(jsonPath("$.completionDate").isEmpty()).andExpect(jsonPath("$.solution").value(""));
+        mvc.perform(post("/api/mock/emit")).andExpect(status().isOk());
+        assertThat(json.readTree(REQUESTS.getLast().body()).get(0).get("assignedGroupName").asString()).isEqualTo("New group");
+        var restored = new SnapshotSender(transport,settings,java.time.Clock.systemUTC(),json);
+        assertThat(restored.rows().getFirst()).containsEntry("assignedEmployeeLogin","demo1").containsEntry("stateEnum","WorkInProgress");
+        mvc.perform(patch(api).contentType("application/json").content("{\"stateEnum\":\"Closed\"}")).andExpect(status().isOk());
+        mvc.perform(patch(api).contentType("application/json").content("{\"stateEnum\":\"Assigned\"}")).andExpect(status().isConflict());
+        mvc.perform(get(api)).andExpect(jsonPath("$.stateEnum").value("Closed"));
     }
 
     @Test

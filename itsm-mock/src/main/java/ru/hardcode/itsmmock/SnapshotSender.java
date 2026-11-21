@@ -31,6 +31,10 @@ final class SnapshotSender {
         this.store = new SnapshotStore(settings.stateFile(), json);
         this.state = store.read(settings.sourceId());
         this.generator = new IncidentGenerator(settings.seed(), settings.batchSize());
+        if (state.rows().isEmpty() && state.deliveredVersion() == 0 && state.pending() == null) {
+            var initial = settings.fixtureFile() == null ? generator.next(List.of(), 1, clock.instant()) : readFixture();
+            persist(new SnapshotStore.State(state.sourceId(), 0, initial, null, null, java.util.Set.of()));
+        }
         updateStatus(state.rejection());
     }
 
@@ -49,18 +53,18 @@ final class SnapshotSender {
                 var result = transport.send(pending);
                 reason = result.reason();
                 if (result.delivered()) {
-                    persist(new SnapshotStore.State(state.sourceId(), pending.version(), state.rows(), null, null));
+                    persist(new SnapshotStore.State(state.sourceId(), pending.version(), state.rows(), null, null, state.manualStates()));
                     delivered = true;
                     break;
                 }
                 if (!result.retryable()) {
                     persist(new SnapshotStore.State(state.sourceId(), state.deliveredVersion(), state.rows(),
-                            pending, reason));
+                            pending, reason, state.manualStates()));
                     break;
                 }
                 if (state.rejection() != null) {
                     persist(new SnapshotStore.State(state.sourceId(), state.deliveredVersion(), state.rows(),
-                            pending, null));
+                            pending, null, state.manualStates()));
                 }
                 if (attempt < settings.maxAttempts()) {
                     Thread.sleep(settings.retryDelay().multipliedBy(attempt));
@@ -78,11 +82,16 @@ final class SnapshotSender {
 
     private void createPending() throws IOException {
         long version = Math.incrementExact(state.deliveredVersion());
-        var rows = settings.fixtureFile() == null
-                ? generator.next(state.rows(), version, clock.instant())
-                : readFixture();
+        var rows = state.rows();
+        if (version > 1 && settings.fixtureFile() == null) {
+            var generated = new java.util.ArrayList<>(generator.next(rows, version, clock.instant()));
+            for (int i = 0; i < rows.size(); i++) {
+                if (state.manualStates().contains(rows.get(i).get("id"))) generated.set(i, rows.get(i));
+            }
+            rows = generated;
+        }
         var pending = new SnapshotStore.Package(version, UUID.randomUUID().toString(), json.writeValueAsBytes(rows));
-        persist(new SnapshotStore.State(state.sourceId(), state.deliveredVersion(), rows, pending, null));
+        persist(new SnapshotStore.State(state.sourceId(), state.deliveredVersion(), rows, pending, null, state.manualStates()));
         updateStatus(null);
     }
 
@@ -98,6 +107,21 @@ final class SnapshotSender {
     private void persist(SnapshotStore.State next) throws IOException {
         store.save(next);
         state = next;
+    }
+
+    synchronized Map<String,Object> patch(String id, Map<String,Object> changes) throws IOException {
+        var rows = new java.util.ArrayList<>(state.rows());
+        var current = IncidentEdits.find(rows, id);
+        var updated = IncidentEdits.apply(current, changes, IncidentEdits.users(rows), clock.instant());
+        rows.set(rows.indexOf(current), updated);
+        var pinned = new java.util.HashSet<>(state.manualStates());
+        if (IncidentEdits.changesStatus(changes)) pinned.add((String) updated.get("id"));
+        var pending = state.pending();
+        if (pending != null) pending = new SnapshotStore.Package(pending.version(),
+                UUID.randomUUID().toString(), json.writeValueAsBytes(rows));
+        persist(new SnapshotStore.State(state.sourceId(), state.deliveredVersion(), rows, pending, null, pinned));
+        updateStatus(null);
+        return updated;
     }
 
     Status status() {

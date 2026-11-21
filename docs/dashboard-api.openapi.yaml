@@ -86,6 +86,7 @@ paths:
   /api/dashboard/incidents:
     get:
       operationId: listIncidents
+      security: [{coordinatorBearer: []}]
       summary: Список инцидентов и групп (KAN-7)
       description: |
         Единственный маршрут списка. `group` повторяется; без него — активные
@@ -539,9 +540,68 @@ paths:
                 machineAccessDenied:
                   summary: Машинный клиент без права чтения
                   value: {"code": "MACHINE_ACCESS_DENIED", "message": "Machine client is not allowed to read the dashboard"}
+  /api/dashboard/users:
+    get:
+      operationId: listItsmUsers
+      security: [{coordinatorBearer: []}]
+      summary: Внешние исполнители ITSM для назначения из карточки
+      responses:
+        '200':
+          description: Справочник внешних сотрудников
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  properties:
+                    sysId: {type: string}
+                    login: {type: string}
+                    displayName: {type: string}
+                    groupName: {type: [string, 'null']}
+              example: [{sysId: demo0, login: demo0, displayName: Дежурный 1 (demo0), groupName: КЦ ИТ Координаторы Массовых Инцидентов}]
+        '401': {description: Требуется Bearer JWT}
+        '403': {description: Нет локального допуска}
+        '503': {description: ITSM недоступна}
   '/api/dashboard/incidents/{incidentId}':
+    patch:
+      operationId: updateIncidentCard
+      security: [{coordinatorBearer: []}]
+      summary: Изменить назначение, группу или статус во внешней ITSM
+      parameters:
+        - {name: incidentId, in: path, required: true, schema: {$ref: '#/components/schemas/IncidentId'}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              additionalProperties: false
+              properties:
+                assignedEmployeeLogin: {type: [string, 'null']}
+                assignedEmployee: {type: [string, 'null']}
+                assignedGroupName: {type: string, minLength: 1}
+                stateEnum: {$ref: '#/components/schemas/ItsmIncidentState'}
+                solution: {type: string}
+            example: {assignedEmployeeLogin: demo2, stateEnum: WorkInProgress}
+      responses:
+        '200':
+          description: Обновлённая карточка после подтверждения ITSM
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentCard'}
+              example: {id: INC000021931151, stateEnum: WorkInProgress, priorityId: 2, submitDate: '2026-11-08T12:02:29Z', deadline: null, assignedEmployeeLogin: demo2, groupMemberships: [], revision: 1, eventSeq: 2}
+        '400': {description: Ошибка в полях изменения, content: {application/json: {schema: {$ref: '#/components/schemas/ErrorResponse'}, example: {code: INCIDENT_PATCH_INVALID, message: Invalid incident update}}}}
+        '401': {description: Требуется Bearer JWT}
+        '403': {description: Нет локального допуска}
+        '404': {description: Инцидент отсутствует}
+        '409': {description: Конфликт перехода статуса}
+        '502': {description: Некорректный ответ ITSM}
+        '503': {description: ITSM недоступна}
     get:
       operationId: getIncidentCard
+      security: [{coordinatorBearer: []}]
       summary: Карточка инцидента (KAN-7)
       description: |
         Полная карточка. `deadline` — `null`, если срока нет (нет поля, `null` или
@@ -934,6 +994,10 @@ paths:
                   value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
 components:
   securitySchemes:
+    coordinatorBearer:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
     cookieAuth:
       type: apiKey
       in: cookie
@@ -1010,6 +1074,8 @@ components:
         - groupMemberships
       description: Строка списка групп.
       properties:
+        assignedEmployeeLogin: {type: [string, 'null']}
+        assignedEmployee: {type: [string, 'null']}
         id:
           $ref: '#/components/schemas/IncidentId'
         productName:
@@ -1056,6 +1122,12 @@ components:
         - eventSeq
         - revision
       properties:
+        itsmUrl: {type: string, format: uri}
+        itsmLinkDemo: {type: boolean}
+        remainingSeconds: {type: [integer, 'null']}
+        overdue: {type: boolean}
+        assignedEmployeeLogin: {type: [string, 'null']}
+        assignedEmployee: {type: [string, 'null']}
         id:
           $ref: '#/components/schemas/IncidentId'
         header:

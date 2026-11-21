@@ -1,6 +1,8 @@
 package ru.hardcode.dashboard.controller;
 
 import java.util.List;
+import org.springframework.security.core.Authentication;
+import ru.hardcode.dashboard.service.CoordinatorAccessService;
 
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -16,11 +18,11 @@ import ru.hardcode.dashboard.dto.MeResponse;
 @RestController
 @RequestMapping("/api/me")
 public class MeController {
-	private final ru.hardcode.dashboard.service.CoordinatorAccessService access;
-	public MeController(ru.hardcode.dashboard.service.CoordinatorAccessService access) { this.access = access; }
+	private final CoordinatorAccessService access;
+	public MeController(CoordinatorAccessService access) { this.access = access; }
 
 	@GetMapping
-	public MeResponse me(@AuthenticationPrincipal Jwt jwt, org.springframework.security.core.Authentication authentication) {
+	public MeResponse me(@AuthenticationPrincipal Jwt jwt, Authentication authentication) {
 		var profile = access.requireActiveUser(authentication);
 		List<String> audience = jwt.getAudience();
 		return new MeResponse(

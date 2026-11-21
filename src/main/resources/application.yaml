@@ -18,6 +18,14 @@ app:
       jwk-set-uri: ${APP_AUTH_HUMAN_JWK_SET_URI:}
       audience: ${APP_AUTH_HUMAN_AUDIENCE:}
       clock-skew: ${APP_AUTH_HUMAN_CLOCK_SKEW:PT30S}
+dashboard:
+  itsm:
+    base-url: ${DASHBOARD_ITSM_BASE_URL:http://127.0.0.1:8082}
+    link-template: "${DASHBOARD_ITSM_LINK_TEMPLATE:http://127.0.0.1:8082/itsm_incident/{incidentId}/page}"
+    link-demo: ${DASHBOARD_ITSM_LINK_DEMO:true}
+    connect-timeout: ${DASHBOARD_ITSM_CONNECT_TIMEOUT:PT2S}
+    read-timeout: ${DASHBOARD_ITSM_READ_TIMEOUT:PT5S}
+
 coordinator:
   access:
     user-client-ids: ${COORDINATOR_USER_CLIENT_IDS:dashboard-web}

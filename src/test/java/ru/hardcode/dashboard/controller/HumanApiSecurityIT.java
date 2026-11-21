@@ -124,9 +124,12 @@ class HumanApiSecurityIT {
 	}
 
 	@BeforeEach
-	void resetDatabase() {
+	void resetDatabase() throws Exception {
 		jdbcTemplate.update("TRUNCATE TABLE itsm_ingest_batch");
 		keycloak = new KeycloakPkceClient(KeycloakTestContainer.issuer());
+		var subject = SignedJWT.parse(keycloak.login(KeycloakTestContainer.TEST_USERNAME, KeycloakTestContainer.TEST_PASSWORD)).getJWTClaimsSet().getSubject();
+		for (String sub : java.util.List.of(subject, "kan16-skew-subject"))
+			jdbcTemplate.update("INSERT INTO users(identity_issuer,identity_subject,login,display_name) VALUES (?,?,?,?) ON CONFLICT DO NOTHING",KeycloakTestContainer.issuer(),sub,"test","Test");
 	}
 
 	// --- positive -------------------------------------------------------------------------
@@ -156,7 +159,7 @@ class HumanApiSecurityIT {
 		// a locally signed token with several audiences must pass the same validation.
 		String foreignSigned = signedTokens.signer().token(TestJwtSigner.claims()
 				.issuer(KeycloakTestContainer.issuer())
-				.subject(jwt)
+				.subject(jwt).claim("azp","dashboard-web")
 				.audience("account", "other-api", HUMAN_AUDIENCE)
 				.expiresAt(Instant.now().plus(Duration.ofMinutes(5))));
 
@@ -276,7 +279,7 @@ class HumanApiSecurityIT {
 	void expiredWithinAllowedSkew_isAccepted_andJustBeforeTheBoundaryToo() throws Exception {
 		String token = signedTokens.signer().token(TestJwtSigner.claims()
 				.issuer(KeycloakTestContainer.issuer())
-				.subject("kan16-skew-subject")
+				.subject("kan16-skew-subject").claim("azp","dashboard-web")
 				.audience(HUMAN_AUDIENCE)
 				.expiresAt(Instant.now().minusSeconds(SKEW.toSeconds() - 10)));
 

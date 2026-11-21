@@ -19,6 +19,7 @@ services:
     env_file:
       - ${BACKEND_ENV_FILE:?Set BACKEND_ENV_FILE to the runtime env file on Pi}
     environment:
+      DASHBOARD_ITSM_BASE_URL: ${DASHBOARD_ITSM_BASE_URL:-http://itsm-mock:8080}
       SERVER_PORT: "8080"
       SPRING_PROFILES_ACTIVE: ${BACKEND_PROFILE:-demo}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/dashboard

@@ -28,7 +28,7 @@ import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestBuilders.formLogin;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.security.test.web.servlet.response.SecurityMockMvcResultMatchers.authenticated;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -68,6 +68,7 @@ class McpEvidenceIT extends McpEvidenceSupport {
 
 	@BeforeEach
 	void setUp() {
+		jdbcTemplate.update("INSERT INTO users(identity_issuer,identity_subject,login,display_name) VALUES ('https://stand.test','operator','operator','Operator') ON CONFLICT DO NOTHING");
 		resetStand();
 		diagnostics = DiagnosticsListener.diagnostics();
 		token = ItsmMachineJwtTestConfiguration.machineToken(jwtEncoder);
@@ -485,7 +486,7 @@ class McpEvidenceIT extends McpEvidenceSupport {
 		// The rest of the application keeps the unchanged login contract.
 		mockMvc.perform(get("/health")).andExpect(status().isOk());
 		mockMvc.perform(get("/api/snapshot/status")).andExpect(status().isUnauthorized());
-		mockMvc.perform(get("/api/snapshot/status").with(httpBasic("operator", "kan39-test-password")))
+		mockMvc.perform(get("/api/snapshot/status").with(jwt().jwt(token -> token.issuer("https://stand.test").subject("operator").claim("azp","dashboard-web"))))
 				.andExpect(status().isOk());
 		mockMvc.perform(formLogin().user("operator").password("kan39-test-password"))
 				.andExpect(authenticated().withUsername("operator"));

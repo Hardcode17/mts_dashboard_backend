@@ -41,7 +41,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.doAnswer;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
@@ -90,6 +90,7 @@ class ItsmSnapshotPublicationIT extends ItsmWorkerTestSupport {
 
 	@BeforeEach
 	void reset() {
+		jdbcTemplate.update("INSERT INTO users(identity_issuer,identity_subject,login,display_name) VALUES ('https://stand.test','operator','operator','Operator') ON CONFLICT DO NOTHING");
 		runner.stop();
 		resetDatabaseAndProcessor();
 		jdbcTemplate.execute("TRUNCATE itsm_snapshot, itsm_incident_change, itsm_incident, itsm_snapshot_source CASCADE");
@@ -101,7 +102,7 @@ class ItsmSnapshotPublicationIT extends ItsmWorkerTestSupport {
 		String first = snapshot(inc("A", "\"Alex\""), inc("B", "\"B\""), inc("C", "\"C\""));
 		acceptSnapshot(BATCH_A, 1, first);
 		mockMvc.perform(getBatch(BATCH_A)).andExpect(status().isOk()).andExpect(jsonPath("$.status").value("RECEIVED"));
-		mockMvc.perform(get("/api/snapshot/status").with(httpBasic("operator", "publication-test")))
+		mockMvc.perform(get("/api/snapshot/status").with(jwt().jwt(token -> token.issuer("https://stand.test").subject("operator").claim("azp","dashboard-web"))))
 				.andExpect(jsonPath("$.lastSuccessAt").value(nullValue()));
 		runner.start();
 		awaitSuccess(BATCH_A);
@@ -111,7 +112,7 @@ class ItsmSnapshotPublicationIT extends ItsmWorkerTestSupport {
 				SET local_data = '{"ack":true,"note":"local","link":"keep","assignment":"team"}'
 				WHERE source_id = ? AND id = 'A'
 				""", SOURCE);
-		mockMvc.perform(get("/api/itsm/incidents").with(httpBasic("operator", "publication-test")))
+		mockMvc.perform(get("/api/itsm/incidents").with(jwt().jwt(token -> token.issuer("https://stand.test").subject("operator").claim("azp","dashboard-web"))))
 				.andExpect(status().isOk()).andExpect(jsonPath("$.count").value(3));
 
 		String second = snapshot(inc("A", "null"), inc("B", "\"B\""), inc("D", "\"D\""));
@@ -137,7 +138,7 @@ class ItsmSnapshotPublicationIT extends ItsmWorkerTestSupport {
 		await("post-commit change event", () -> events.stream().anyMatch(e -> e.sourceVersion() == 2L));
 		assertThat(events.stream().filter(e -> e.sourceVersion() == 2L).findFirst().orElseThrow().affectedIncidentIds())
 				.containsExactlyInAnyOrder("A", "C", "D");
-		mockMvc.perform(get("/api/itsm/incidents").with(httpBasic("operator", "publication-test")))
+		mockMvc.perform(get("/api/itsm/incidents").with(jwt().jwt(token -> token.issuer("https://stand.test").subject("operator").claim("azp","dashboard-web"))))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.snapshot.sourceVersion").value(2))
 				.andExpect(jsonPath("$.count").value(3))
@@ -180,7 +181,7 @@ class ItsmSnapshotPublicationIT extends ItsmWorkerTestSupport {
 		assertThat(revision()).isEqualTo(initialRevision);
 		assertThat(changes(2)).isEmpty();
 		assertThat(employee()).isEqualTo("original");
-		mockMvc.perform(get("/api/snapshot/status").with(httpBasic("operator", "publication-test")))
+		mockMvc.perform(get("/api/snapshot/status").with(jwt().jwt(token -> token.issuer("https://stand.test").subject("operator").claim("azp","dashboard-web"))))
 				.andExpect(jsonPath("$.lastSuccessAt").isNotEmpty())
 				.andExpect(jsonPath("$.revision").value((Object) initialRevision))
 				.andExpect(jsonPath("$.stale").value(true));
@@ -554,7 +555,7 @@ class ItsmSnapshotPublicationIT extends ItsmWorkerTestSupport {
 
 	private org.springframework.test.web.servlet.ResultActions sourceStatus() throws Exception {
 		return mockMvc.perform(get("/api/snapshot/source-status").param("sourceId", SOURCE)
-				.with(httpBasic("operator", "publication-test"))).andExpect(status().isOk());
+				.with(jwt().jwt(token -> token.issuer("https://stand.test").subject("operator").claim("azp","dashboard-web")))).andExpect(status().isOk());
 	}
 
 	private static String snapshot(String... incidents) {

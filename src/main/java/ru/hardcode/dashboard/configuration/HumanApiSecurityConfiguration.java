@@ -41,7 +41,7 @@ public class HumanApiSecurityConfiguration {
 				ApiErrorWriter.write(response, objectMapper, AppErrors.COORDINATOR_ACCESS_DENIED);
 
 		return http
-				.securityMatcher(properties.isRequested() ? HUMAN_API_PATH : "/api/me")
+				.securityMatcher(properties.isRequested() ? new String[]{HUMAN_API_PATH} : new String[]{"/api/me","/api/dashboard/**"})
 				.csrf(csrf -> csrf.disable())
 				.requestCache(cache -> cache.disable())
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))

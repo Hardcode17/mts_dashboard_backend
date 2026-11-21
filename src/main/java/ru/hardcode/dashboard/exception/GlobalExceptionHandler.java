@@ -10,7 +10,13 @@ import ru.hardcode.dashboard.dto.AppErrorResponse;
 @RestControllerAdvice
 public class GlobalExceptionHandler {
 
-	@ExceptionHandler(AppException.class)
+    @ExceptionHandler(PublishedIncidentNotFound.class)
+    public ResponseEntity<?> incidentNotFound(PublishedIncidentNotFound ex) {
+        return ResponseEntity.status(404).body(java.util.Map.of("code",ex.getAppError().getCode(),
+                "message",ex.getMessage(),"revision",ex.revision(),"eventSeq",ex.eventSeq()));
+    }
+
+    @ExceptionHandler(AppException.class)
 	public ResponseEntity<AppErrorResponse> handleAppException(AppException exception) {
 		AppError error = exception.getAppError();
 		return ResponseEntity.status(error.getHttpStatus())

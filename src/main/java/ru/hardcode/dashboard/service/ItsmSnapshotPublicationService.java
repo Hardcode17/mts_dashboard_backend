@@ -176,7 +176,7 @@ public class ItsmSnapshotPublicationService implements ItsmBatchProcessor {
 						change.revision(), change.incidentIds()))
 				.toList();
 	}
-	private static void validateDomainFields(ItsmIncidentSnapshot snapshot) {
+	static void validateDomainFields(ItsmIncidentSnapshot snapshot) {
 		for (int i = 0; i < snapshot.size(); i++) {
 			var raw = snapshot.records().get(i).raw();
 			if (!(raw.get("productName") instanceof String productName) || productName.isBlank()) {

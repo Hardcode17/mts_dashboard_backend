@@ -25,15 +25,7 @@ Keycloak аутентифицирует человека, таблица `users`
 
 ## Интеграция с KAN-16
 
-На момент разработки KAN-16 ещё в работе. В `HealthSecurityConfiguration` добавлено
-правило `.requestMatchers("/api/**").access(coordinatorAccess)`. При замене Basic/Form
-на Resource Server сохранить это правило и обработчики `CoordinatorSecurityErrors`.
-Не заменять локальную проверку на простое `authenticated()`.
-Оставить один обработчик `/api/me`: `CoordinatorProfileController` с локальным профилем.
-
-До интеграции KAN-16 штатная конфигурация не принимает пользовательские Bearer JWT.
-Тест подключает отдельную Resource Server цепочку с настоящими JWT Keycloak и тем же
-production AuthorizationManager. Альтернативный вход в production не добавляется.
+Штатная цепочка HumanApiSecurityConfiguration проверяет Bearer JWT через Keycloak и передаёт авторизацию CoordinatorAuthorizationManager. Ответ /api/me дополнен локальными id, sub, login и displayName.
 
 ## Выдача допуска на стенде
 
@@ -54,7 +46,7 @@ UPDATE users SET is_active = false, updated_at = now() WHERE id = 1;
 ```
 
 Следующий запрос со старым токеном отклоняется. Уже авторизованный запрос не отменяется.
-Миграция `V3_22__coordinator_users.sql` добавлена после V3, существующие миграции и demo V1
+Миграция `V6__coordinator_users.sql` добавлена после V5, существующие миграции и demo V1
 не меняются. Таблица соответствует разделу 4.1 документации БД v5.
 
 ## Проверка

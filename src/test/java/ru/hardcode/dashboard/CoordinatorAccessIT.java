@@ -14,21 +14,9 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
-import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
-import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
-import org.springframework.core.annotation.Order;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.http.SessionCreationPolicy;
-import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
-import org.springframework.security.oauth2.core.OAuth2Error;
-import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
-import org.springframework.security.oauth2.jwt.JwtException;
-import org.springframework.security.oauth2.jwt.JwtValidators;
-import org.springframework.security.oauth2.jwt.NimbusJwtDecoder;
-import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.context.DynamicPropertyRegistry;
 import org.springframework.test.context.DynamicPropertySource;
@@ -40,8 +28,6 @@ import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 import org.testcontainers.images.builder.Transferable;
-import ru.hardcode.dashboard.configuration.CoordinatorAuthorizationManager;
-import ru.hardcode.dashboard.configuration.CoordinatorSecurityErrors;
 import tools.jackson.databind.ObjectMapper;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -50,7 +36,7 @@ import static org.springframework.test.web.servlet.request.MockMvcRequestBuilder
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
-/** Real Keycloak tokens and PostgreSQL; the test chain is the KAN-16 integration seam. */
+/** Real Keycloak tokens and PostgreSQL; the production KAN-16 filter chain enforces local admission. */
 @SpringBootTest(properties = {"coordinator.access.user-client-ids=dashboard-web", "itsm.worker.enabled=false"})
 @AutoConfigureMockMvc
 @ActiveProfiles("work")
@@ -69,7 +55,6 @@ class CoordinatorAccessIT {
 			.withExposedPorts(8080)
 			.withCommand("start-dev", "--import-realm")
 			.withCopyToContainer(Transferable.of(realm("coordinator-it")), "/opt/keycloak/data/import/coordinator-it-realm.json")
-			.withCopyToContainer(Transferable.of(realm("other-it")), "/opt/keycloak/data/import/other-it-realm.json")
 			.waitingFor(Wait.forHttp("/realms/coordinator-it/.well-known/openid-configuration").forStatusCode(200))
 			.withStartupTimeout(Duration.ofMinutes(3));
 
