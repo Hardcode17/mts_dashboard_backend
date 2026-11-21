@@ -29,9 +29,11 @@ public class HumanApiSecurityConfiguration {
 	public static final String HUMAN_API_PATH = "/api/**";
 	/** Realm name of the human chain's {@code 401} challenge. */
 	static final String HUMAN_REALM = "dashboard-human";
-	static final RequestMatcher DASHBOARD_INCIDENTS = new OrRequestMatcher(
+	static final RequestMatcher DASHBOARD_READS = new OrRequestMatcher(
 			PathPatternRequestMatcher.withDefaults().matcher("/api/dashboard/incidents"),
-			PathPatternRequestMatcher.withDefaults().matcher("/api/dashboard/incidents/{incidentId}"));
+			PathPatternRequestMatcher.withDefaults().matcher("/api/dashboard/incidents/{incidentId}"),
+			PathPatternRequestMatcher.withDefaults().matcher("/api/dashboard/monitoring/summary"),
+			PathPatternRequestMatcher.withDefaults().matcher("/api/incidents/{id}/relationships"));
 
 	@Bean
 	@Order(2)
@@ -46,7 +48,7 @@ public class HumanApiSecurityConfiguration {
 		var dashboardEntryPoint = new StrictBearerAuthenticationEntryPoint(
 				objectMapper, AppErrors.AUTH_REQUIRED, HUMAN_REALM);
 		AuthenticationEntryPoint authenticationEntryPoint = (request, response, error) -> {
-			var entryPoint = DASHBOARD_INCIDENTS.matches(request) ? dashboardEntryPoint : humanEntryPoint;
+			var entryPoint = DASHBOARD_READS.matches(request) ? dashboardEntryPoint : humanEntryPoint;
 			entryPoint.commence(request, response, error);
 		};
 		AccessDeniedHandler accessDeniedHandler = (request, response, exception) ->

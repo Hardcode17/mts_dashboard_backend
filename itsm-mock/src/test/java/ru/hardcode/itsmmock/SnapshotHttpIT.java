@@ -151,6 +151,20 @@ class SnapshotHttpIT {
         assertThat(maximum).isNotEqualTo(new IncidentGenerator(54, 500).next(List.of(), 1, now));
     }
 
+    @Test
+    void emitsFourStableGraphCases() {
+        Instant now = Instant.parse("2026-11-21T00:00:00Z");
+        var rows = new IncidentGenerator(53, 4).next(List.of(), 1, now);
+
+        assertThat(rows).hasSize(4);
+        String parentId = (String) rows.get(0).get("id");
+        assertThat(rows.get(0)).doesNotContainKey("parentId");
+        assertThat(rows.get(1).get("parentId")).isEqualTo(parentId);
+        assertThat(rows.get(2).get("parentId")).isEqualTo(parentId);
+        assertThat(rows.get(3)).doesNotContainKey("parentId");
+        assertThat(parentId).isNotEqualTo(rows.get(0).get("sysId"));
+    }
+
     private static Path temporaryState() {
         try {
             return Files.createTempDirectory("itsm-mock-it-").resolve("state.json");

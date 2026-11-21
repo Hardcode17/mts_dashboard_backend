@@ -50,7 +50,7 @@ public class HealthSecurityConfiguration {
 						.anyRequest().authenticated())
 				.exceptionHandling(exceptions -> exceptions.defaultAuthenticationEntryPointFor(
 						(request, response, error) -> ApiErrorWriter.write(response, objectMapper, AppErrors.AUTH_REQUIRED),
-						new AndRequestMatcher(HumanApiSecurityConfiguration.DASHBOARD_INCIDENTS, apiAccept)))
+						new AndRequestMatcher(HumanApiSecurityConfiguration.DASHBOARD_READS, apiAccept)))
 				.httpBasic(Customizer.withDefaults())
 				.formLogin(Customizer.withDefaults())
 				.build();

@@ -262,6 +262,28 @@ class ItsmIncidentSnapshotParserTest {
 	}
 
 	@Test
+	void parentIdKeepsAbsentExplicitNullAndStringApart() {
+		ItsmIncidentRecord absent = parser.parse(single(record -> record.remove("parentId"))).records().getFirst();
+		assertThat(absent.raw()).doesNotContainKey("parentId");
+
+		ItsmIncidentRecord explicitNull = parser.parse(single(record -> record.put("parentId", null)))
+				.records().getFirst();
+		assertThat(explicitNull.raw()).containsEntry("parentId", null);
+
+		ItsmIncidentRecord linked = parser.parse(single(record -> record.put("parentId", "INC000700000001")))
+				.records().getFirst();
+		assertThat(linked.raw()).containsEntry("parentId", "INC000700000001");
+	}
+
+	@Test
+	void parentIdMustBeANonBlankStringOrNull() {
+		assertRecordError(single(record -> record.put("parentId", 700_000_000L)), 0, "parentId",
+				"ITSM record in snapshot at index 0 has invalid field parentId: must be a string or null");
+		assertRecordError(single(record -> record.put("parentId", "   ")), 0, "parentId",
+				"ITSM record in snapshot at index 0 has invalid field parentId: must be a non-blank string");
+	}
+
+	@Test
 	void activeIncidentWithCompletionDateIsRejected() {
 		assertRecordError(single(record -> record.put("completionDate", "2026-11-21T10:00:00Z")), 0,
 				"completionDate");

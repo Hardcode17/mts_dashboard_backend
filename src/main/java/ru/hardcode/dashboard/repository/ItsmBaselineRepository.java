@@ -210,6 +210,49 @@ public class ItsmBaselineRepository {
 		}
 	}
 
+	/** Existing imported relations of one source, keyed by child id. */
+	public Map<String, String> findImportedHierarchy(String sourceId) {
+		var links = new LinkedHashMap<String, String>();
+		jdbcClient.sql("""
+				SELECT hierarchy.child_id, hierarchy.parent_id
+				FROM incident_hierarchies AS hierarchy
+				JOIN itsm_incident AS child ON child.id = hierarchy.child_id
+				JOIN itsm_incident AS parent ON parent.id = hierarchy.parent_id
+				WHERE child.source_id = ? AND parent.source_id = ?
+				""")
+				.param(sourceId)
+				.param(sourceId)
+				.query((rs, row) -> Map.entry(rs.getString("child_id"), rs.getString("parent_id")))
+				.list()
+				.forEach(link -> links.put(link.getKey(), link.getValue()));
+		return links;
+	}
+
+	/**
+	 * Replaces the source-owned imported hierarchy in the caller's publication transaction.
+	 * The child id is the primary key and the whole candidate set is written in one place, so a
+	 * repeated delivery cannot duplicate an edge and a missing relation is removed atomically.
+	 */
+	public void replaceImportedHierarchy(String sourceId, Map<String, String> linksByChildId) {
+		jdbcClient.sql("""
+				DELETE FROM incident_hierarchies AS hierarchy
+				USING itsm_incident AS incident
+				WHERE incident.source_id = ?
+				  AND (hierarchy.child_id = incident.id OR hierarchy.parent_id = incident.id)
+				""")
+				.param(sourceId)
+				.update();
+		new java.util.TreeMap<>(linksByChildId).forEach((childId, parentId) ->
+				jdbcClient.sql("""
+						INSERT INTO incident_hierarchies (child_id, parent_id)
+						VALUES (?, ?)
+						ON CONFLICT (child_id) DO UPDATE SET parent_id = EXCLUDED.parent_id
+						""")
+						.param(childId)
+						.param(parentId)
+						.update());
+	}
+
 	public void updateSnapshot(UUID batchId, String sourceId, long sourceVersion, String payloadSha256, Instant appliedAt) {
 		jdbcClient.sql("""
 				INSERT INTO itsm_snapshot (id, batch_id, source_id, source_version, payload_sha256,

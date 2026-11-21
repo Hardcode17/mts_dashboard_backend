@@ -85,7 +85,7 @@ class ItsmBatchIntakeIT {
 
 	@BeforeEach
 	void setUp() {
-		jdbcTemplate.update("TRUNCATE TABLE itsm_ingest_batch");
+		jdbcTemplate.update("TRUNCATE TABLE itsm_ingest_batch CASCADE");
 		bearerToken = ItsmMachineJwtTestConfiguration.machineToken(jwtEncoder);
 	}
 

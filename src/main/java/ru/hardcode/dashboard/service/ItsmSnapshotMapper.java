@@ -66,7 +66,8 @@ public class ItsmSnapshotMapper {
 			"lastAssignmentToTeamDateTime",
 			"completionDate",
 			"solution",
-			ItsmIncidentSnapshotParser.FIELD_WAITING_EXIT_DATE
+			ItsmIncidentSnapshotParser.FIELD_WAITING_EXIT_DATE,
+			ItsmIncidentSnapshotParser.FIELD_PARENT_ID
 	);
 
 	/**

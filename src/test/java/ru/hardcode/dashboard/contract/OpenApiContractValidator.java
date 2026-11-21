@@ -6,6 +6,7 @@ import java.io.UncheckedIOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
@@ -64,6 +65,8 @@ final class OpenApiContractValidator {
 	private static final String INGEST = "/api/integrations/itsm/batches";
 	private static final String DASHBOARD_INCIDENTS = "/api/dashboard/incidents";
 	private static final String DASHBOARD_CARD = "/api/dashboard/incidents/{incidentId}";
+	private static final String DASHBOARD_MONITORING = "/api/dashboard/monitoring/summary";
+	private static final String DASHBOARD_RELATIONSHIPS = "/api/incidents/{id}/relationships";
 	private static final String DASHBOARD_SOURCES = "/api/dashboard/sources";
 	private static final String DASHBOARD_EVENTS = "/api/dashboard/events";
 	private static final String DASHBOARD_ACK = "/api/dashboard/events/ack";
@@ -547,6 +550,8 @@ final class OpenApiContractValidator {
 		Map<String, String> canonical = new LinkedHashMap<>();
 		canonical.put("listIncidents", "GET " + DASHBOARD_INCIDENTS);
 		canonical.put("getIncidentCard", "GET " + DASHBOARD_CARD);
+		canonical.put("monitoringSummary", "GET " + DASHBOARD_MONITORING);
+		canonical.put("getIncidentRelationships", "GET " + DASHBOARD_RELATIONSHIPS);
 		canonical.put("listSources", "GET " + DASHBOARD_SOURCES);
 		canonical.put("pollEvents", "GET " + DASHBOARD_EVENTS);
 		canonical.put("acknowledgeEvents", "POST " + DASHBOARD_ACK);
@@ -577,6 +582,33 @@ final class OpenApiContractValidator {
 			violations.add("dashboard-api: ack must require exactly the eventIds set");
 		}
 		checkDashboardExamples();
+		checkMonitoringExamples(dashboard);
+	}
+
+	private void checkMonitoringExamples(JsonNode dashboard) {
+		JsonNode examples = operation(dashboard, "get", DASHBOARD_MONITORING)
+				.path("responses").path("200").path("content").path("application/json").path("examples");
+		JsonNode active = examples.path("active").path("value");
+		JsonNode empty = examples.path("beforeFirstSuccess").path("value");
+		if (active.isMissingNode() || empty.isMissingNode()) {
+			violations.add("dashboard-api: monitoring summary must document active and empty examples");
+			return;
+		}
+		if (active.path("timeline").isEmpty()) {
+			violations.add("dashboard-api: monitoring example must carry actual timeline observations");
+		}
+		Instant previous = Instant.MIN;
+		for (JsonNode point : active.path("timeline")) {
+			Instant at = Instant.parse(point.path("at").stringValue());
+			if (!at.isAfter(previous)) {
+				violations.add("dashboard-api: monitoring timeline must be strictly ordered by at");
+				break;
+			}
+			previous = at;
+		}
+		if (!empty.path("timeline").isEmpty() || !empty.path("updatedAt").isNull()) {
+			violations.add("dashboard-api: absent monitoring history must stay empty without invented observations");
+		}
 	}
 
 	private static boolean hasParameter(JsonNode operation, String location, String name) {

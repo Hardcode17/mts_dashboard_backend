@@ -65,10 +65,15 @@ final class IncidentGenerator {
         int team = Math.floorMod(random.nextInt(TEAMS.size()) + index, TEAMS.size());
         Instant started = now.minus(5, ChronoUnit.MINUTES);
         String symptom = SYMPTOMS.get(random.nextInt(SYMPTOMS.size()));
-        String suffix = String.format(java.util.Locale.ROOT, "%012d", 700_000_000L + index);
+        String suffix = suffix(index);
         var item = new LinkedHashMap<String, Object>();
         item.put("sysId", suffix);
         item.put("id", "INC" + suffix);
+        // Four stable graph cases in the first slots: a parent, its two children and an
+        // unrelated incident. parentId is the external id, never the sysId.
+        if (index == 1 || index == 2) {
+            item.put("parentId", "INC" + suffix(0));
+        }
         item.put("stateReason", "Нет");
         item.put("stateReasonId", "1");
         item.put("submitDate", started.toString());
@@ -122,6 +127,10 @@ final class IncidentGenerator {
             incident.put("completionDate", null);
         }
         incident.put("solution", state.finished() ? "Восстановление подтверждено на стенде." : "");
+    }
+
+    private static String suffix(int index) {
+        return String.format(java.util.Locale.ROOT, "%012d", 700_000_000L + index);
     }
 
     private record State(String name, int id, String label, boolean finished) {}

@@ -3,10 +3,10 @@ info:
   title: Dashboard — чтения координатора (KAN-7)
   version: 1.0.0
   description: |
-    Канонический контракт чтений дашборда для KAN-7: список и группы инцидентов,
-    карточка, статус источника, polling по `eventSeq` и подтверждение точного набора `eventId`.
+    Канонический контракт чтений дашборда: список и группы инцидентов, карточка и её связи,
+    статус источника, polling по `eventSeq`, подтверждения и сводка мониторинга за 24 часа.
     Согласован в KAN-20 с приёмом снимков (`itsm-ingest.openapi.yaml`, KAN-27/KAN-53).
-    Список и карточка читаются из опубликованных снимков. Для статуса источника, polling и
+    Список, карточка и связи читаются из опубликованных снимков. Для статуса источника, polling и
     подтверждений в этой спецификации пока приведены только примеры.
     Примеры синтетические (INC `INC0000210955xx` не пересекаются с реальной выгрузкой),
     валидируются схемами и пригодны фронту до готовности БД.
@@ -17,6 +17,8 @@ info:
     | --- | --- | --- |
     | Список | `GET /api/dashboard/incidents` | группы через `group`; отдельного маршрута групп нет |
     | Карточка | `GET /api/dashboard/incidents/{incidentId}` | `incidentId` — строковый INC, URL-кодируется |
+    | Мониторинг | `GET /api/dashboard/monitoring/summary` | текущие счётчики + только фактические публикации за 24 ч |
+    | Связи карточки | `GET /api/incidents/{id}/relationships` | `id` — строковый INC фокуса; глубина один шаг |
     | Статус источника | `GET /api/dashboard/sources` | все источники, включая stale |
     | Polling | `GET /api/dashboard/events?sinceEventSeq=` | события с `eventSeq > sinceEventSeq` |
     | Подтверждение | `POST /api/dashboard/events/ack` | точный набор `eventId`, без `since` и «до» |
@@ -71,7 +73,7 @@ info:
 
     ## Чтения и авторизация
 
-    Список и карточка используют человеческий Bearer JWT (KAN-16), если он настроен;
+    Список, карточка и связи используют человеческий Bearer JWT (KAN-16), если он настроен;
     иначе действуют локальные форма входа и HTTP Basic. Машинный мониторинг источников —
     `machineBearer` (предлагается). В KAN-27 машинная цепочка с правом импорта действует
     только на `/api/integrations/itsm/**`.
@@ -723,6 +725,207 @@ paths:
                     message: Incident not found
                     eventSeq: 0
                     revision: 0
+  /api/dashboard/monitoring/summary:
+    get:
+      operationId: monitoringSummary
+      summary: Сводка режима мониторинга (KAN-62)
+      description: |
+        Read-only снимок для большого экрана: текущие счётчики четырёх независимых категорий,
+        распределение активных инцидентов по приоритетам, нагрузка на координаторов и
+        таймлайн фактических публикаций за последние 24 часа. Категории могут пересекаться.
+        `activeCount` — только `Assigned` и `WorkInProgress`; `research` в него не входит.
+        Таймлайн отсортирован по `at`, затем по порядку публикации. Точки не синтезируются:
+        без опубликованных снимков за окно возвращается `[]`, а `updatedAt` = `null`, пока
+        не было ни одной успешной публикации. `priorities` содержит только встреченные
+        приоритеты активных инцидентов; `coordinatorLoad` — только назначенных координаторов,
+        по убыванию нагрузки, затем по имени.
+      security:
+        - humanBearer: []
+        - cookieAuth: []
+        - localBasic: []
+      responses:
+        '200':
+          description: Текущая сводка и ограниченная 24-часовой таймлайн-историей.
+          headers:
+            Cache-Control:
+              description: '`no-store`: экран опрашивает маршрут каждые 5 секунд.'
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/MonitoringSummary'
+              examples:
+                active:
+                  summary: Сводка с пересекающимися категориями и двумя точками истории
+                  value:
+                    updatedAt: '2026-11-21T09:05:01.000000Z'
+                    activeCount: 4
+                    counts:
+                      critical: 2
+                      high: 1
+                      coordinators: 2
+                      research: 1
+                    timeline:
+                      - at: '2026-11-21T09:04:31.000000Z'
+                        critical: 2
+                        high: 1
+                        coordinators: 2
+                        research: 1
+                      - at: '2026-11-21T09:05:01.000000Z'
+                        critical: 2
+                        high: 1
+                        coordinators: 2
+                        research: 1
+                    priorities:
+                      - priorityId: 1
+                        count: 1
+                      - priorityId: 3
+                        count: 1
+                      - priorityId: 4
+                        count: 2
+                    coordinatorLoad:
+                      - name: Буратино (buratino)
+                        count: 1
+                      - name: Дядя Фёдор (unclefedor)
+                        count: 1
+                beforeFirstSuccess:
+                  summary: Публикаций ещё не было — история пуста, ничего не выдумываем
+                  value:
+                    updatedAt: null
+                    activeCount: 0
+                    counts:
+                      critical: 0
+                      high: 0
+                      coordinators: 0
+                      research: 0
+                    timeline: []
+                    priorities: []
+                    coordinatorLoad: []
+        '401':
+          description: Нет допустимой сессии или человеческого токена.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                cookieAuthRequired:
+                  summary: Нет сессии интерфейса
+                  value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
+  '/api/incidents/{id}/relationships':
+    get:
+      operationId: getIncidentRelationships
+      summary: Связи инцидента для графа карточки (KAN-66)
+      description: |
+        Один шаг в обе стороны от `focusId`: сам инцидент, его непосредственный родитель и
+        непосредственные дети. `nodes` не содержит соседей другого уровня; `edges` содержит
+        только рёбра между `focusId` и его прямым родителем/детьми. Известный INC без связей
+        возвращает один узел и пустой `edges`. Неизвестный опубликованный INC — `404`.
+        Для существующих узлов `title`, `stateEnum` и `priorityId` могут быть `null`; `id` — нет.
+      security:
+        - humanBearer: []
+        - cookieAuth: []
+        - localBasic: []
+      parameters:
+        - name: id
+          in: path
+          required: true
+          description: 'Строковый INC фокуса, URL-кодируется; числовой вид не принимается.'
+          schema:
+            $ref: '#/components/schemas/IncidentId'
+          examples:
+            parent:
+              value: "INC000021095531"
+      responses:
+        '200':
+          description: 'Граф глубины один: фокус, прямой родитель и прямые дети.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentRelationships'
+              examples:
+                parentWithChildren:
+                  summary: 'Фокус — родитель двух дочерних INC'
+                  value:
+                    focusId: INC000021095531
+                    nodes:
+                      - id: INC000021095531
+                        title: Оплата · Отказ камеры
+                        stateEnum: Assigned
+                        priorityId: 4
+                      - id: INC000021095532
+                        title: Оплата · Очередь платежей
+                        stateEnum: WorkInProgress
+                        priorityId: 4
+                      - id: INC000021095533
+                        title: Оплата · Повторные списания
+                        stateEnum: Assigned
+                        priorityId: 3
+                    edges:
+                      - parentId: INC000021095531
+                        childId: INC000021095532
+                      - parentId: INC000021095531
+                        childId: INC000021095533
+                childWithParent:
+                  summary: 'Фокус — дочерний INC; виден только прямой родитель'
+                  value:
+                    focusId: INC000021095532
+                    nodes:
+                      - id: INC000021095532
+                        title: Оплата · Очередь платежей
+                        stateEnum: WorkInProgress
+                        priorityId: 4
+                      - id: INC000021095531
+                        title: Оплата · Отказ камеры
+                        stateEnum: Assigned
+                        priorityId: 4
+                    edges:
+                      - parentId: INC000021095531
+                        childId: INC000021095532
+                unrelated:
+                  summary: 'Известный INC без связей: один узел и пустой список рёбер'
+                  value:
+                    focusId: INC000021095540
+                    nodes:
+                      - id: INC000021095540
+                        title: null
+                        stateEnum: Research
+                        priorityId: null
+                    edges: []
+        '400':
+          description: Идентификатор не в формате INC.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidIncidentId:
+                  summary: Идентификатор не в формате INC
+                  value: {"code": "INVALID_INCIDENT_ID", "message": "incidentId must be an INC identifier such as INC000021095531"}
+        '401':
+          description: Нет допустимой сессии или токена.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                cookieAuthRequired:
+                  summary: Нет сессии интерфейса
+                  value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
+        '404':
+          description: Инцидент отсутствует в опубликованной версии.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentNotFound'
+              examples:
+                notFound:
+                  summary: INC отсутствует в опубликованной версии
+                  value:
+                    code: INCIDENT_NOT_FOUND
+                    message: Incident INC000021095599 not found
+                    eventSeq: 43
+                    revision: 42
   /api/dashboard/sources:
     get:
       operationId: listSources
@@ -1041,6 +1244,116 @@ components:
           type: string
           description: 'Правило, по которому INC попал в группу.'
       additionalProperties: false
+    MonitoringCounts:
+      type: object
+      description: 'Независимые счётчики категорий; категории могут пересекаться.'
+      required:
+        - critical
+        - high
+        - coordinators
+        - research
+      properties:
+        critical:
+          type: integer
+          minimum: 0
+        high:
+          type: integer
+          minimum: 0
+        coordinators:
+          type: integer
+          minimum: 0
+        research:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+    MonitoringTimelinePoint:
+      type: object
+      description: 'Фактическое наблюдение опубликованного снимка, без синтетических нулей.'
+      required:
+        - at
+        - critical
+        - high
+        - coordinators
+        - research
+      properties:
+        at:
+          $ref: '#/components/schemas/UtcInstant'
+        critical:
+          type: integer
+          minimum: 0
+        high:
+          type: integer
+          minimum: 0
+        coordinators:
+          type: integer
+          minimum: 0
+        research:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+    MonitoringPriority:
+      type: object
+      required:
+        - priorityId
+        - count
+      properties:
+        priorityId:
+          type: integer
+          format: int32
+        count:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+    MonitoringCoordinatorLoad:
+      type: object
+      required:
+        - name
+        - count
+      properties:
+        name:
+          type: string
+          minLength: 1
+        count:
+          type: integer
+          minimum: 0
+      additionalProperties: false
+    MonitoringSummary:
+      type: object
+      required:
+        - updatedAt
+        - activeCount
+        - counts
+        - timeline
+        - priorities
+        - coordinatorLoad
+      properties:
+        updatedAt:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+          description: 'Время последней успешной публикации; `null` до первой публикации.'
+        activeCount:
+          type: integer
+          minimum: 0
+          description: 'Инциденты в `Assigned` или `WorkInProgress`.'
+        counts:
+          $ref: '#/components/schemas/MonitoringCounts'
+        timeline:
+          type: array
+          description: 'Публикации за последние 24 часа, по возрастанию `at`.'
+          items:
+            $ref: '#/components/schemas/MonitoringTimelinePoint'
+        priorities:
+          type: array
+          description: 'Активные инциденты по исходному `priorityId`; только встреченные значения.'
+          items:
+            $ref: '#/components/schemas/MonitoringPriority'
+        coordinatorLoad:
+          type: array
+          description: 'Активные инциденты на координаторах по назначенному сотруднику.'
+          items:
+            $ref: '#/components/schemas/MonitoringCoordinatorLoad'
+      additionalProperties: false
     IncidentSummary:
       type: object
       required:
@@ -1259,6 +1572,66 @@ components:
             - $ref: '#/components/schemas/EventSeq'
             - type: 'null'
           description: '`null`: состав групп меняется с событиями, поэтому не фиксируется.'
+      additionalProperties: false
+    IncidentRelationshipNode:
+      type: object
+      required:
+        - id
+        - title
+        - stateEnum
+        - priorityId
+      description: 'Узел графа: фокус, его прямой родитель или прямой дочерний INC.'
+      properties:
+        id:
+          $ref: '#/components/schemas/IncidentId'
+        title:
+          type:
+            - string
+            - 'null'
+          description: 'Заголовок из опубликованного снимка; `null`, если его нет.'
+        stateEnum:
+          anyOf:
+            - $ref: '#/components/schemas/ItsmIncidentState'
+            - type: 'null'
+          description: 'Статус может быть недоступен только у существующего узла; `id` всегда заполнен.'
+        priorityId:
+          anyOf:
+            - type: integer
+              format: int32
+            - type: 'null'
+          description: 'Исходный приоритет ITSM или `null`, если значение недоступно.'
+      additionalProperties: false
+    IncidentRelationshipEdge:
+      type: object
+      required:
+        - parentId
+        - childId
+      properties:
+        parentId:
+          $ref: '#/components/schemas/IncidentId'
+        childId:
+          $ref: '#/components/schemas/IncidentId'
+      additionalProperties: false
+    IncidentRelationships:
+      type: object
+      required:
+        - focusId
+        - nodes
+        - edges
+      description: 'Один шаг в обе стороны от фокуса; рёбра ведут только от фокуса к родителю или детям.'
+      properties:
+        focusId:
+          $ref: '#/components/schemas/IncidentId'
+        nodes:
+          type: array
+          description: 'Фокус, прямой родитель (если есть) и прямые дети (если есть).'
+          items:
+            $ref: '#/components/schemas/IncidentRelationshipNode'
+        edges:
+          type: array
+          description: 'Пустой список для известного INC без связей.'
+          items:
+            $ref: '#/components/schemas/IncidentRelationshipEdge'
       additionalProperties: false
     IncidentNotFound:
       type: object
