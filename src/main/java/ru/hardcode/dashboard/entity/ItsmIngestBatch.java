@@ -61,6 +61,13 @@ public class ItsmIngestBatch {
 	@Column(name = "diagnostic", length = 2000)
 	private String diagnostic;
 
+	@Column(name = "row_version", nullable = false)
+	private long rowVersion;
+
+	@JdbcTypeCode(SqlTypes.TIMESTAMP_WITH_TIMEZONE)
+	@Column(name = "next_attempt_at")
+	private Instant nextAttemptAt;
+
 	protected ItsmIngestBatch() {
 	}
 
@@ -110,5 +117,13 @@ public class ItsmIngestBatch {
 
 	public String getDiagnostic() {
 		return diagnostic;
+	}
+
+	public long getRowVersion() {
+		return rowVersion;
+	}
+
+	public Instant getNextAttemptAt() {
+		return nextAttemptAt;
 	}
 }

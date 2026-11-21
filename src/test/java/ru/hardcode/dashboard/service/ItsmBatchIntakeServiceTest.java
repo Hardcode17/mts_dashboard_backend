@@ -40,7 +40,11 @@ class ItsmBatchIntakeServiceTest {
 
 	@BeforeEach
 	void setUp() {
-		service = new ItsmBatchIntakeService(batchRepository, sqlRepository, new ObjectMapper(), 10);
+		service = new ItsmBatchIntakeService(
+				batchRepository, sqlRepository, new ObjectMapper(),
+				org.mockito.Mockito.mock(org.springframework.beans.factory.ObjectProvider.class),
+				10
+		);
 	}
 
 	@Test

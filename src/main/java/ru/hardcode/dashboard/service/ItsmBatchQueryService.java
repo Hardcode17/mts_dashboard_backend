@@ -28,7 +28,8 @@ public class ItsmBatchQueryService {
 						metadata.sourceVersion(),
 						metadata.receivedAt(),
 						metadata.status(),
-						metadata.diagnostic()
+						metadata.diagnostic(),
+						metadata.nextAttemptAt()
 				))
 				.orElseThrow(() -> new AppException(
 						AppErrors.ITSM_BATCH_NOT_FOUND,
