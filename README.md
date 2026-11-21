@@ -109,34 +109,17 @@ CORS-origins браузерного SPA задаются `APP_CORS_ALLOWED_ORIGI
 ## Стендовый Keycloak в продакшен-деплое
 
 `compose.yaml` бэкенда поднимает Keycloak на `127.0.0.1:8084` на Raspberry Pi.
-Для публичного стенда прокси на Pi принимает HTTPS через Tailscale Funnel.
+Перед стартом сервис `keycloak-volume-init` назначает владельца каталога тома
+H2. Он сохраняет существующий realm и его пользователей.
+Tailscale Funnel направляет HTTPS на фронтенд, а фронтенд передаёт публичные
+OIDC-запросы и запросы ресурсов Keycloak через внутреннюю сеть Docker.
 Для деплоя задайте переменные репозитория в
 Settings → Secrets and variables → Actions → Variables:
 
 - `STAND_KEYCLOAK_URL` — публичный базовый URL Keycloak без слэша в конце
-  (например `https://raspberrypi.tail029aee.ts.net/auth`);
+  (например `https://raspberrypi.tail029aee.ts.net/keycloak`);
 - `STAND_FRONTEND_URL` — опубликованный origin фронтенда
   (например `https://raspberrypi.tail029aee.ts.net`).
-
-При размещении Keycloak под `/auth` прокси направляет
-`/auth/realms/dashboard/` и `/auth/resources/` на `http://127.0.0.1:8084`,
-удаляя префикс `/auth`. Остальные пути `/auth/`, включая Admin API и realm
-`master`, должны возвращать 404. Пример для Nginx на Pi за Funnel:
-
-```nginx
-location ~ ^/auth(/(?:realms/dashboard|resources)/.*)$ {
-    rewrite ^/auth(/.*)$ $1 break;
-    proxy_pass http://127.0.0.1:8084;
-    proxy_set_header Host $host;
-    proxy_set_header X-Forwarded-Host $host;
-    proxy_set_header X-Forwarded-Proto https;
-    proxy_set_header X-Forwarded-Port 443;
-    proxy_set_header X-Forwarded-For $remote_addr;
-}
-location /auth/ {
-    return 404;
-}
-```
 
 `scripts/prepare-runtime.sh` рендерит realm через `scripts/render-realm.py`: пользователь
 `coordinator` с паролем из `STAND_COORDINATOR_PASSWORD` runtime-файла, redirect URI
@@ -151,6 +134,11 @@ SPA получает CORS на `/api/**`; машинный приём `/api/inte
 Admin API и выдаёт допуск для публичного issuer. Realm импортируется один раз.
 Если фронтенд сменил origin после первого запуска, обновите redirect URI,
 web origin и post-logout redirect URI клиента `dashboard-web` в Keycloak.
+
+Если на существующей базе Flyway сообщает, что V9 отсутствует при уже
+установленной V10, сделайте резервную копию PostgreSQL. Затем один раз
+запустите backend с `SPRING_FLYWAY_OUT_OF_ORDER=true`, проверьте, что V9
+успешно записана в `flyway_schema_history`, и вернитесь к обычному запуску.
 
 ### Загрузка тестового снимка
 
