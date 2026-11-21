@@ -174,14 +174,19 @@ public class DashboardIncidentService {
 		}
 		var row = normalized.records().getFirst().raw();
 		String updated = json.writeValueAsString(row);
+		java.sql.Timestamp observedAt = java.sql.Timestamp.from(clock.instant());
+		Instant sourceTime = ItsmSourceTimes.of(row.get("updatedAt"));
 		Long revision = db.query("""
-				INSERT INTO itsm_incident_change(source_id,incident_id,source_version,change_revision,
-				    change_kind,before_data,after_data,coordinator_id)
-				SELECT source_id,id,last_seen_version,nextval('itsm_snapshot_change_revision'),'UPDATED',
-				    source_data,?::jsonb,?
+				INSERT INTO itsm_incident_change(source_id,incident_id,source_version,change_revision,event_seq,
+				    change_kind,before_data,after_data,coordinator_id,observed_at,source_time)
+				SELECT source_id,id,last_seen_version,nextval('itsm_snapshot_change_revision'),
+				    nextval('itsm_incident_change_event_seq'),'UPDATED',
+				    source_data,?::jsonb,?,?,?
 				FROM itsm_incident WHERE id=? AND source_data IS DISTINCT FROM ?::jsonb
 				RETURNING change_revision
-				""", (rs, n) -> rs.getLong(1), updated, actor, incidentId, updated).stream().findFirst().orElse(null);
+				""", (rs, n) -> rs.getLong(1), updated, actor, observedAt,
+				sourceTime == null ? null : java.sql.Timestamp.from(sourceTime), incidentId, updated)
+				.stream().findFirst().orElse(null);
 		if (revision != null) {
 			domain.upsertDomain(mapper.map(normalized), before.source(), Set.of(incidentId), Set.of());
 			db.update("UPDATE itsm_incident SET source_data=?::jsonb,last_change_revision=? WHERE id=?",

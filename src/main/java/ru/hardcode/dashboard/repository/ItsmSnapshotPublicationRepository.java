@@ -1,5 +1,7 @@
 package ru.hardcode.dashboard.repository;
 
+import java.sql.Timestamp;
+import java.time.Instant;
 import java.util.List;
 import java.util.Set;
 
@@ -81,8 +83,14 @@ public class ItsmSnapshotPublicationRepository {
 	 * Diff normalized JSON as JSONB so property order and equivalent numeric values do not produce
 	 * changes. A complete observation updates last_seen_version even when the change revision stays
 	 * unchanged. An absent row keeps the last observed fields and local state.
+	 *
+	 * <p>Every journaled row (KAN-28) also commits the observation time, the optional source-side
+	 * time of the record ({@code sourceTimes} maps incident id to an ISO instant), and a monotonic
+	 * {@code event_seq} from a dedicated sequence, independent of the change revision. Inside one
+	 * publication the sequence is assigned in incident id order through the sorted materialized CTE.
 	 */
-	public List<Change> journalChanges(String sourceId, long version, String snapshot) {
+	public List<Change> journalChanges(String sourceId, long version, String snapshot, Instant observedAt,
+			String sourceTimes) {
 		return jdbc.query("""
 				WITH incoming AS (
 				    SELECT doc->>'id' AS incident_id, doc FROM jsonb_array_elements(?::jsonb) AS doc
@@ -113,14 +121,26 @@ public class ItsmSnapshotPublicationRepository {
 				           )) OR (incoming.incident_id IS NULL AND old.present_in_source)
 				), revision AS MATERIALIZED (
 				    SELECT nextval('itsm_snapshot_change_revision') AS value WHERE EXISTS (SELECT 1 FROM changes)
+				), source_times AS MATERIALIZED (
+				    SELECT key AS incident_id, (value #>> '{}')::timestamptz AS source_time
+				    FROM jsonb_each(?::jsonb)
+				), sorted AS MATERIALIZED (
+				    SELECT changes.incident_id, revision.value AS change_revision, kind, before_data, after_data,
+				           source_times.source_time
+				    FROM changes CROSS JOIN revision
+				    LEFT JOIN source_times ON source_times.incident_id = changes.incident_id
+				    ORDER BY changes.incident_id
 				)
 				INSERT INTO itsm_incident_change
-				    (source_id, incident_id, source_version, change_revision, change_kind, before_data, after_data)
-				SELECT ?, incident_id, ?, revision.value, kind, before_data, after_data FROM changes CROSS JOIN revision
+				    (source_id, incident_id, source_version, change_revision, event_seq, change_kind,
+				     before_data, after_data, observed_at, source_time)
+				SELECT ?, sorted.incident_id, ?, sorted.change_revision, nextval('itsm_incident_change_event_seq'),
+				       sorted.kind, sorted.before_data, sorted.after_data, ?, sorted.source_time
+				FROM sorted
 				RETURNING incident_id, change_revision, change_kind
 				""", (rs, n) -> new Change(rs.getString("incident_id"), rs.getLong("change_revision"),
 					rs.getString("change_kind").equals("MISSING")),
-				snapshot, sourceId, sourceId, version);
+				snapshot, sourceId, sourceTimes, sourceId, version, Timestamp.from(observedAt));
 	}
 
 	public long nextRevision() {

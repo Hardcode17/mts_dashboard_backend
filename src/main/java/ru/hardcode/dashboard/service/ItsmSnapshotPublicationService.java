@@ -114,7 +114,8 @@ public class ItsmSnapshotPublicationService implements ItsmBatchProcessor {
 		}
 
 		restoreLegacyBaseline(work.sourceId(), head.observedVersion());
-		var changes = repository.journalChanges(work.sourceId(), work.sourceVersion(), snapshot);
+		var changes = repository.journalChanges(work.sourceId(), work.sourceVersion(), snapshot,
+				clock.instant(), objectMapper.writeValueAsString(sourceTimes(normalized)));
 		long revision;
 		if (!changes.isEmpty()) {
 			revision = changes.getFirst().revision();
@@ -142,6 +143,18 @@ public class ItsmSnapshotPublicationService implements ItsmBatchProcessor {
 
 	private String toJson(ItsmIncidentSnapshot normalized) {
 		return objectMapper.writeValueAsString(normalized.records().stream().map(ItsmIncidentRecord::raw).toList());
+	}
+
+	/** Source-side time of each record, when the ITSM provides one. */
+	private static Map<String, String> sourceTimes(ItsmIncidentSnapshot normalized) {
+		var times = new java.util.LinkedHashMap<String, String>();
+		for (var record : normalized.records()) {
+			var sourceTime = ItsmSourceTimes.of(record.raw().get("updatedAt"));
+			if (sourceTime != null) {
+				times.put(record.id(), sourceTime.toString());
+			}
+		}
+		return times;
 	}
 
 	private void restoreLegacyBaseline(String sourceId, Long observedVersion) {

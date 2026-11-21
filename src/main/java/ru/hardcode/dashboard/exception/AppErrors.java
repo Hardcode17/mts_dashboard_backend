@@ -35,6 +35,7 @@ public enum AppErrors implements AppError {
 	AUTH_REQUIRED("AUTH_REQUIRED", HttpStatus.UNAUTHORIZED, "Authentication is required"),
 	INVALID_GROUP("INVALID_GROUP", HttpStatus.BAD_REQUEST, "Unknown dashboard group ${group}"),
 	INVALID_CURSOR("INVALID_CURSOR", HttpStatus.BAD_REQUEST, "cursor is not a valid list cursor"),
+	INVALID_EVENT_SEQ("INVALID_EVENT_SEQ", HttpStatus.BAD_REQUEST, "afterEventSeq must be a non-negative event sequence number"),
 	INVALID_LIMIT("INVALID_LIMIT", HttpStatus.BAD_REQUEST, "limit must be between 1 and 100"),
 	INVALID_INCIDENT_ID("INVALID_INCIDENT_ID", HttpStatus.BAD_REQUEST,
 			"incidentId must be an INC identifier such as INC000021095531"),
