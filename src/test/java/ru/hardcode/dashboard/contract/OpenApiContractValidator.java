@@ -546,6 +546,8 @@ final class OpenApiContractValidator {
 						key -> new ArrayList<>()).add(entry.getKey().toUpperCase(Locale.ROOT) + " " + path.getKey())));
 		Map<String, String> canonical = new LinkedHashMap<>();
 		canonical.put("listIncidents", "GET " + DASHBOARD_INCIDENTS);
+		canonical.put("listItsmUsers", "GET /api/dashboard/users");
+		canonical.put("updateIncidentCard", "PATCH " + DASHBOARD_CARD);
 		canonical.put("getIncidentCard", "GET " + DASHBOARD_CARD);
 		canonical.put("listSources", "GET " + DASHBOARD_SOURCES);
 		canonical.put("pollEvents", "GET " + DASHBOARD_EVENTS);

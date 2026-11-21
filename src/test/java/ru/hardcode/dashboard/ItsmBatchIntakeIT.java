@@ -41,7 +41,7 @@ import tools.jackson.databind.ObjectMapper;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.nullValue;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestBuilders.formLogin;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.security.test.web.servlet.response.SecurityMockMvcResultMatchers.authenticated;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -86,6 +86,11 @@ class ItsmBatchIntakeIT {
 	@BeforeEach
 	void setUp() {
 		jdbcTemplate.update("TRUNCATE TABLE itsm_ingest_batch");
+		jdbcTemplate.update("""
+				INSERT INTO users(identity_issuer, identity_subject, login, display_name)
+				VALUES ('https://keycloak.test/realms/dashboard', 'kan27-operator', 'operator', 'Test Operator')
+				ON CONFLICT (identity_issuer, identity_subject) DO UPDATE SET is_active = true
+				""");
 		bearerToken = ItsmMachineJwtTestConfiguration.machineToken(jwtEncoder);
 	}
 
@@ -354,7 +359,7 @@ class ItsmBatchIntakeIT {
 		mockMvc.perform(postBatch(key.toString(), SOURCE_ID, 17, "[{\"id\":\"INC-1\"}]"))
 				.andExpect(status().isAccepted());
 
-		mockMvc.perform(get("/api/snapshot/status").with(httpBasic("operator", "kan27-test-password")))
+		mockMvc.perform(get("/api/snapshot/status").with(jwt().jwt(builder -> builder.issuer("https://keycloak.test/realms/dashboard").subject("kan27-operator").claim("azp", "dashboard-web"))))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.lastReceivedAt").isNotEmpty())
 				.andExpect(jsonPath("$.lastSuccessAt").value(nullValue()))
@@ -377,7 +382,7 @@ class ItsmBatchIntakeIT {
 				key
 		);
 
-		mockMvc.perform(get("/api/snapshot/status").with(httpBasic("operator", "kan27-test-password")))
+		mockMvc.perform(get("/api/snapshot/status").with(jwt().jwt(builder -> builder.issuer("https://keycloak.test/realms/dashboard").subject("kan27-operator").claim("azp", "dashboard-web"))))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.lastReceivedAt").isNotEmpty())
 				.andExpect(jsonPath("$.lastSuccessAt").isNotEmpty())
@@ -393,7 +398,7 @@ class ItsmBatchIntakeIT {
 		mockMvc.perform(postBatch(UUID.randomUUID().toString(), SOURCE_ID, 18, "[{\"id\":\"INC-2\"}]"))
 				.andExpect(status().isAccepted());
 
-		mockMvc.perform(get("/api/snapshot/status").with(httpBasic("operator", "kan27-test-password")))
+		mockMvc.perform(get("/api/snapshot/status").with(jwt().jwt(builder -> builder.issuer("https://keycloak.test/realms/dashboard").subject("kan27-operator").claim("azp", "dashboard-web"))))
 				.andExpect(status().isOk())
 				.andExpect(jsonPath("$.lastSuccessAt").isNotEmpty())
 				.andExpect(jsonPath("$.revision").value(41))

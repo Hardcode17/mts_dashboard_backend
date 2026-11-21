@@ -1,5 +1,8 @@
 # mts_dashboard_backend
 
+Локальный допуск координаторов, выдача доступа и интеграция с Keycloak:
+[docs/coordinator-access.md](docs/coordinator-access.md).
+
 ## Тестовый деплой на Raspberry Pi
 
 Пуш в main запускает Deploy backend на runner организации Hardcode17 с метками

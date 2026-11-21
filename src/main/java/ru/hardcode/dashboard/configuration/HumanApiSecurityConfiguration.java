@@ -37,6 +37,7 @@ public class HumanApiSecurityConfiguration {
 	@Order(2)
 	public SecurityFilterChain humanApiSecurityFilterChain(
 			HttpSecurity http,
+			CoordinatorAuthorizationManager access,
 			HumanDecoder humanDecoder,
 			HumanAuthProperties properties,
 			ObjectMapper objectMapper
@@ -50,10 +51,10 @@ public class HumanApiSecurityConfiguration {
 			entryPoint.commence(request, response, error);
 		};
 		AccessDeniedHandler accessDeniedHandler = (request, response, exception) ->
-				ApiErrorWriter.write(response, objectMapper, AppErrors.HUMAN_ACCESS_DENIED);
+				ApiErrorWriter.write(response, objectMapper, AppErrors.COORDINATOR_ACCESS_DENIED);
 
 		return http
-				.securityMatcher(properties.isRequested() ? HUMAN_API_PATH : "/api/me")
+				.securityMatcher(properties.isRequested() ? new String[]{HUMAN_API_PATH} : new String[]{"/api/me","/api/dashboard/**"})
 				.csrf(csrf -> csrf.disable())
 				.requestCache(cache -> cache.disable())
 				.sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
@@ -62,7 +63,7 @@ public class HumanApiSecurityConfiguration {
 						.authenticationEntryPoint(authenticationEntryPoint)
 						.accessDeniedHandler(accessDeniedHandler))
 				.authorizeHttpRequests(authorize -> authorize
-						.anyRequest().authenticated())
+						.anyRequest().access(access))
 				.oauth2ResourceServer(oauth2 -> oauth2
 						.authenticationEntryPoint(authenticationEntryPoint)
 						.accessDeniedHandler(accessDeniedHandler)

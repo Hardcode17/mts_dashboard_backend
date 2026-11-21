@@ -91,6 +91,7 @@ paths:
   /api/dashboard/incidents:
     get:
       operationId: listIncidents
+      security: [{coordinatorBearer: []}]
       summary: Список инцидентов и групп (KAN-7)
       description: |
         Единственный маршрут списка. Без `group` — все опубликованные `Assigned` и
@@ -103,10 +104,6 @@ paths:
         При равном времени — по строковому `id` по возрастанию. На первой странице счётчики
         выбранных групп относятся ко всей выборке, а `incidents` — только к этой странице;
         невыбранные группы пусты. На следующих страницах `groups` пуст.
-      security:
-        - humanBearer: []
-        - cookieAuth: []
-        - localBasic: []
       parameters:
         - name: group
           in: query
@@ -550,12 +547,209 @@ paths:
               schema:
                 $ref: '#/components/schemas/ErrorResponse'
               examples:
-                humanAccessDenied:
-                  summary: Нет права доступа
-                  value: {"code": "HUMAN_ACCESS_DENIED", "message": "The access token does not grant access to this resource"}
+                coordinatorAccessDenied:
+                  summary: Нет локального допуска координатора
+                  value: {"code": "COORDINATOR_ACCESS_DENIED", "message": "Coordinator access is not granted"}
+  /api/dashboard/users:
+    get:
+      operationId: listItsmUsers
+      security: [{coordinatorBearer: []}]
+      summary: Внешние исполнители ITSM для назначения из карточки
+      description: |
+        Справочник внешних сотрудников, прочитанный backend-proxy из `GET /user` внешней
+        ITSM. Браузер никогда не обращается к ITSM напрямую: список отдаётся под
+        человеческим Bearer JWT координатора (KAN-22, KAN-58).
+      responses:
+        '200':
+          description: Справочник внешних сотрудников, доступных для назначения ответственными.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  type: object
+                  required: [login]
+                  additionalProperties: false
+                  properties:
+                    sysId: {type: string}
+                    login: {type: string}
+                    displayName: {type: string}
+                    groupName: {type: [string, 'null']}
+              examples:
+                standDirectory:
+                  summary: Дежурные смены и инженеры групп стенда
+                  value:
+                    - {sysId: demo0, login: demo0, displayName: 'Дежурный 1 (demo0)', groupName: 'КЦ ИТ Координаторы Массовых Инцидентов'}
+                    - {sysId: demo2, login: demo2, displayName: 'Дежурный 3 (demo2)', groupName: 'Support'}
+        '401':
+          description: Требуется Bearer JWT.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                authRequired:
+                  summary: Нет Bearer JWT
+                  value: {"code": "HUMAN_AUTH_REQUIRED", "message": "Human access token is required"}
+        '403':
+          description: Нет локального допуска.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                coordinatorAccessDenied:
+                  summary: Токен без локального допуска координатора
+                  value: {"code": "COORDINATOR_ACCESS_DENIED", "message": "Coordinator access is not granted"}
+        '503':
+          description: Внешняя ITSM недоступна.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                itsmOffline:
+                  summary: ITSM не отвечает
+                  value: {"code": "ITSM_OFFLINE", "message": "ITSM is unavailable"}
   '/api/dashboard/incidents/{incidentId}':
+    patch:
+      operationId: updateIncidentCard
+      security: [{coordinatorBearer: []}]
+      summary: Изменить назначение, группу или статус во внешней ITSM
+      description: |
+        Координатор меняет инцидент прямо из дашборда: назначает ответственного из
+        `GET /api/dashboard/users`, передаёт группу решения или переводит статус.
+        Изменение сначала уходит в ITSM (`PATCH /itsm_incident/{sys_id}`); только после
+        подтверждения backend обновляет локальное состояние и пишет автора в журнал.
+        Ошибка ITSM оставляет локальные данные неизменными (KAN-57, KAN-58).
+      parameters:
+        - {name: incidentId, in: path, required: true, schema: {$ref: '#/components/schemas/IncidentId'}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              additionalProperties: false
+              properties:
+                assignedEmployeeLogin: {type: [string, 'null']}
+                assignedEmployee: {type: [string, 'null']}
+                assignedGroupName: {type: string, minLength: 1}
+                stateEnum: {$ref: '#/components/schemas/ItsmIncidentState'}
+                solution: {type: string}
+            examples:
+              assignResponsible:
+                summary: Назначить ответственного из справочника
+                value: {assignedEmployeeLogin: demo2}
+              handOffToGroup:
+                summary: Передать группе решения
+                value: {assignedGroupName: Support}
+              resolveWithSolution:
+                summary: Завершить с решением
+                value: {stateEnum: Resolved, solution: 'Восстановлен основной канал приёма платежей'}
+      responses:
+        '200':
+          description: Обновлённая карточка после подтверждения ITSM.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentCard'}
+              examples:
+                afterAssignment:
+                  summary: Карточка после назначения ответственного и смены группы
+                  value:
+                    id: INC000021931151
+                    header: Сбой приёма платежей на кассах
+                    productName: Тестовый магазин
+                    assignedGroupName: Support
+                    assignedEmployeeLogin: demo2
+                    assignedEmployee: 'Дежурный 3 (demo2)'
+                    stateEnum: WorkInProgress
+                    priorityId: 2
+                    submitDate: '2026-11-08T12:02:29Z'
+                    deadline: '2026-11-22T12:02:29Z'
+                    completionDate: null
+                    solution: null
+                    remainingSeconds: 86400
+                    overdue: false
+                    itsmUrl: 'http://127.0.0.1:8082/itsm_incident/INC000021931151/page'
+                    itsmDemo: true
+                    groupMemberships: []
+                    eventSeq: 2
+                    revision: 1
+        '400':
+          description: Ошибка в полях изменения.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                patchInvalid:
+                  summary: Некорректное изменение
+                  value: {"code": "INCIDENT_PATCH_INVALID", "message": "Invalid incident update"}
+        '401':
+          description: Требуется Bearer JWT.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                authRequired:
+                  summary: Нет Bearer JWT
+                  value: {"code": "HUMAN_AUTH_REQUIRED", "message": "Human access token is required"}
+        '403':
+          description: Нет локального допуска.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                coordinatorAccessDenied:
+                  summary: Токен без локального допуска координатора
+                  value: {"code": "COORDINATOR_ACCESS_DENIED", "message": "Coordinator access is not granted"}
+        '404':
+          description: Инцидент отсутствует в опубликованном состоянии.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                incidentNotFound:
+                  summary: Неизвестный INC
+                  value: {"code": "INCIDENT_NOT_FOUND", "message": "Incident INC000021931151 not found"}
+        '409':
+          description: Конфликт перехода статуса.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                closedIncident:
+                  summary: Закрытый инцидент нельзя вернуть в работу
+                  value: {"code": "INCIDENT_CONFLICT", "message": "Incident update conflicts with the current state"}
+        '502':
+          description: Некорректный ответ ITSM.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                badResponse:
+                  summary: ITSM вернула непригодный ответ
+                  value: {"code": "ITSM_BAD_RESPONSE", "message": "Invalid response from ITSM"}
+        '503':
+          description: Внешняя ITSM недоступна.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                itsmOffline:
+                  summary: ITSM не отвечает
+                  value: {"code": "ITSM_OFFLINE", "message": "ITSM is unavailable"}
     get:
       operationId: getIncidentCard
+      security: [{coordinatorBearer: []}]
       summary: Карточка инцидента (KAN-7)
       description: |
         Полная карточка. `deadline` — `null`, если срока нет (нет поля, `null` или
@@ -564,10 +758,6 @@ paths:
         из которой он построен. `itsmUrl` открывает ровно этот INC во внешней системе
         (или демоцель при `itsmDemo=true`). GET не меняет назначение, версию и историю и
         не выполняет запрос по ссылке.
-      security:
-        - humanBearer: []
-        - cookieAuth: []
-        - localBasic: []
       parameters:
         - name: incidentId
           in: path
@@ -967,15 +1157,11 @@ paths:
                   value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
 components:
   securitySchemes:
-    humanBearer:
+    coordinatorBearer:
       type: http
       scheme: bearer
       bearerFormat: JWT
-      description: 'Токен оператора Keycloak (KAN-16); токен импорта не подходит.'
-    localBasic:
-      type: http
-      scheme: basic
-      description: 'Локальный доступ, если человеческий JWT не настроен.'
+      description: 'Токен координатора Keycloak (`azp=dashboard-web`); после проверки подписи требуется локальный допуск (KAN-16, KAN-22). Токен импорта не подходит.'
     cookieAuth:
       type: apiKey
       in: cookie
@@ -1052,6 +1238,8 @@ components:
         - groupMemberships
       description: Строка списка групп.
       properties:
+        assignedEmployeeLogin: {type: [string, 'null']}
+        assignedEmployee: {type: [string, 'null']}
         id:
           $ref: '#/components/schemas/IncidentId'
         productName:
@@ -1103,6 +1291,11 @@ components:
         - eventSeq
         - revision
       properties:
+        itsmUrl: {type: string, format: uri}
+        remainingSeconds: {type: [integer, 'null']}
+        overdue: {type: boolean}
+        assignedEmployeeLogin: {type: [string, 'null']}
+        assignedEmployee: {type: [string, 'null']}
         id:
           $ref: '#/components/schemas/IncidentId'
         header:

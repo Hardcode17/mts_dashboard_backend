@@ -79,3 +79,10 @@ tasks.processTestResources {
 		into("keycloak/realm")
 	}
 }
+
+evaluationDependsOn(":itsm-mock")
+val mockArchive = project(":itsm-mock").tasks.named<org.springframework.boot.gradle.tasks.bundling.BootJar>("bootJar")
+tasks.test {
+    dependsOn(mockArchive)
+    systemProperty("itsm.test.mock-jar", mockArchive.get().archiveFile.get().asFile.absolutePath)
+}

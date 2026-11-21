@@ -41,8 +41,8 @@ class DashboardIncidentCardIT extends DashboardIncidentTestSupport {
 		registry.add("app.auth.human.issuer", () -> ISSUER);
 		registry.add("app.auth.human.audience", () -> AUDIENCE);
 		registry.add("app.auth.human.jwk-set-uri", Kan16JwtTestConfiguration::jwkSetUri);
-		registry.add("dashboard.itsm-link.template", () -> LINK_PREFIX + "{incidentId}");
-		registry.add("dashboard.itsm-link.demo", () -> true);
+		registry.add("dashboard.itsm.link-template", () -> LINK_PREFIX + "{incidentId}");
+		registry.add("dashboard.itsm.link-demo", () -> true);
 	}
 
 	@Test

@@ -13,8 +13,8 @@ public class DashboardItsmLink {
 	private final String template;
 	private final boolean demo;
 
-	public DashboardItsmLink(@Value("${dashboard.itsm-link.template}") String template,
-			@Value("${dashboard.itsm-link.demo}") boolean demo) {
+	public DashboardItsmLink(@Value("${dashboard.itsm.link-template}") String template,
+			@Value("${dashboard.itsm.link-demo}") boolean demo) {
 		URI sample;
 		int placeholderOffset = template.indexOf(PLACEHOLDER);
 		try {
@@ -44,6 +44,6 @@ public class DashboardItsmLink {
 
 	private static IllegalArgumentException invalidTemplate() {
 		return new IllegalArgumentException(
-				"dashboard.itsm-link.template must be an absolute HTTP(S) URL with one {incidentId} outside the authority");
+				"dashboard.itsm.link-template must be an absolute HTTP(S) URL with one {incidentId} outside the authority");
 	}
 }

@@ -9,7 +9,7 @@ import java.util.Map;
 import java.util.SplittableRandom;
 
 final class IncidentGenerator {
-    private static final List<String> TEAMS = List.of(
+    static final List<String> TEAMS = List.of(
             "КЦ ИТ Координаторы Массовых Инцидентов", "Дежурные платёжных сервисов",
             "Команда хранения данных", "Команда клиентских приложений");
     private static final List<String> PRIORITIES = List.of("Низкий", "Средний", "Высокий", "Наивысший");
@@ -18,7 +18,7 @@ final class IncidentGenerator {
     private static final List<String> SCENARIOS = List.of("Подтверждение заказа", "Вход", "Проверка статуса");
     private static final List<String> SYMPTOMS = List.of("Запросы завершаются с задержкой",
             "Часть запросов отклоняется", "Показатель успешности снизился");
-    private static final List<State> STATES = List.of(
+    static final List<State> STATES = List.of(
             new State("Assigned", 0, "Назначен", false),
             new State("WorkInProgress", 2, "Выполняется", false),
             new State("Resolved", 7, "Завершен", true),
@@ -112,7 +112,7 @@ final class IncidentGenerator {
         return item;
     }
 
-    private void changeState(Map<String, Object> incident, State state, Instant now) {
+    static void changeState(Map<String, Object> incident, State state, Instant now) {
         incident.put("stateEnum", state.name());
         incident.put("stateId", state.id());
         incident.put("state", state.label());
@@ -124,5 +124,5 @@ final class IncidentGenerator {
         incident.put("solution", state.finished() ? "Восстановление подтверждено на стенде." : "");
     }
 
-    private record State(String name, int id, String label, boolean finished) {}
+    record State(String name, int id, String label, boolean finished) {}
 }

@@ -131,7 +131,16 @@ public class ItsmSnapshotPublicationRepository {
 		return Boolean.TRUE.equals(jdbc.queryForObject("SELECT pg_input_is_valid(?, 'jsonb')", Boolean.class, snapshot));
 	}
 
-	public void updateObservation(String sourceId, long version, long revision, String snapshot) {
+	public java.util.Optional<Long> dashboardRevision() {
+        return jdbc.queryForList("SELECT revision FROM dashboard_publication WHERE singleton AND revision > 0",Long.class)
+                .stream().findFirst();
+    }
+
+    public void advanceDashboard(long revision) {
+        jdbc.update("UPDATE dashboard_publication SET revision=?, event_seq=event_seq+1 WHERE singleton",revision);
+    }
+
+    public void updateObservation(String sourceId, long version, long revision, String snapshot) {
 		jdbc.update("""
 				UPDATE itsm_incident AS incident
 				SET source_data = doc, present_in_source = true, last_seen_version = ?,
@@ -149,6 +158,7 @@ public class ItsmSnapshotPublicationRepository {
 		jdbc.update("""
 				UPDATE itsm_snapshot_source SET observed_version = ?, change_revision = ? WHERE source_id = ?
 				""", version, revision, sourceId);
+		advanceDashboard(revision);
 	}
 
 	public SourceStatus sourceStatus(String sourceId) {

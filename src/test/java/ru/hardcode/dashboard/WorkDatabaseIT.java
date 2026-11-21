@@ -78,6 +78,10 @@ class WorkDatabaseIT {
 
 			work.getBean(Flyway.class).validate();
 			workHistory = workJdbc.queryForList(HISTORY);
+			workJdbc.update("""
+					INSERT INTO users(identity_issuer, identity_subject, login, display_name, is_active)
+					VALUES ('https://idp.test/realm', 'persisted-subject', 'persisted', 'Persisted User', false)
+					""");
 			assertThat(workHistory).extracting(row -> row.get("script"))
 					.contains("V2__itsm_ingest_batch.sql")
 					.doesNotContain("V1__deployment_sample.sql");
@@ -98,6 +102,8 @@ class WorkDatabaseIT {
 			assertThat(jdbc(demo).queryForMap(HISTORY.replace("WHERE success", "WHERE success AND version = '1'")))
 					.isEqualTo(demoV1);
 			assertThat(jdbc(work).queryForList(HISTORY)).isEqualTo(workHistory);
+			assertThat(jdbc(work).queryForObject("SELECT is_active FROM users WHERE identity_subject = 'persisted-subject'", Boolean.class))
+					.isFalse();
 			assertThat(jdbc(work).queryForObject("SELECT count(*) FROM itsm_ingest_batch WHERE id = ?", Long.class, batch))
 					.isEqualTo(1L);
 			assertThat(jdbc(work).update("UPDATE flyway_schema_history SET checksum = checksum + 1 WHERE version = '2'"))

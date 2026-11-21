@@ -43,7 +43,7 @@ public class SnapshotStatusService {
 
 		Instant lastReceivedAt = latest.map(LatestBatch::receivedAt).orElse(null);
 		Instant lastSuccessAt = success.map(SuccessfulBatch::processedAt).orElse(null);
-		Long revision = success.map(SuccessfulBatch::revision).orElse(null);
+		Long revision = publicationRepository.dashboardRevision().orElseGet(() -> success.map(SuccessfulBatch::revision).orElse(null));
 		boolean stale = latest.isEmpty()
 				|| latest.get().status() != ItsmBatchStatus.SUCCEEDED
 				|| success.isEmpty()

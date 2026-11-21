@@ -29,12 +29,11 @@ public class DashboardIncidentRepository {
 	}
 
 	public Publication publication() {
-		// Applied batches are durable. Skipped deliveries have no processed_at and do not
-		// advance the sequence, but a published observation without content changes does.
+		// The singleton publication counters are advanced by the snapshot worker and by
+		// coordinator edits alike: event_seq counts published observations, revision is the
+		// latest change revision. Skipped deliveries do not advance the sequence.
 		return jdbc.sql("""
-				SELECT count(*) AS event_seq, coalesce(max(processing_revision), 0) AS revision
-				FROM itsm_ingest_batch
-				WHERE status = 'SUCCEEDED' AND processed_at IS NOT NULL
+				SELECT event_seq, revision FROM dashboard_publication WHERE singleton
 				""").query((rs, row) -> new Publication(rs.getLong("event_seq"), rs.getLong("revision"))).single();
 	}
 
@@ -64,7 +63,8 @@ public class DashboardIncidentRepository {
 				       incident.submit_date, incident.deadline, incident.completion_date,
 				       incident.last_assignment_to_team_at, incident.solution, service.service_key,
 				       attributes.header, attributes.description, attributes.product_master_id,
-				       attributes.service_type, attributes.assigned_employee, attributes.state_reason
+				       attributes.service_type, attributes.assigned_employee, attributes.assigned_employee_login,
+				       attributes.state_reason
 				""" + INCIDENTS_FROM + """
 				LEFT JOIN itsm_catalog_service AS service ON service.id = incident.service_id
 				CROSS JOIN LATERAL (
@@ -73,17 +73,19 @@ public class DashboardIncidentRepository {
 				           max(string_value) FILTER (WHERE attribute_name = 'productMasterId') AS product_master_id,
 				           max(string_value) FILTER (WHERE attribute_name = 'serviceType') AS service_type,
 				           max(string_value) FILTER (WHERE attribute_name = 'assignedEmployee') AS assigned_employee,
+				           max(string_value) FILTER (WHERE attribute_name = 'assignedEmployeeLogin') AS assigned_employee_login,
 				           max(string_value) FILTER (WHERE attribute_name = 'stateReason') AS state_reason
 				    FROM itsm_incident_attribute
 				    WHERE incident_id = incident.id AND value_type = 'STRING'
 				      AND attribute_name IN ('header', 'description', 'productMasterId', 'serviceType',
-				                             'assignedEmployee', 'stateReason')
+				                             'assignedEmployee', 'assignedEmployeeLogin', 'stateReason')
 				) AS attributes
 				WHERE incident.present_in_source AND incident.id = :id
 				""").param("id", incidentId)
 				.query((rs, row) -> new CardRow(summary(rs), rs.getString("header"), rs.getString("description"),
 						rs.getString("product_master_id"), rs.getString("service_key"), rs.getString("service_type"),
-						rs.getString("assigned_employee"), rs.getString("state_reason"),
+						rs.getString("assigned_employee"), rs.getString("assigned_employee_login"),
+						rs.getString("state_reason"),
 						instant(rs, "last_assignment_to_team_at"), rs.getString("solution")))
 				.optional();
 	}
@@ -110,7 +112,7 @@ public class DashboardIncidentRepository {
 	}
 
 	public record CardRow(IncidentSummary summary, String header, String description, String productMasterId,
-			String service, String serviceType, String assignedEmployee, String stateReason,
-			Instant lastAssignmentToTeamDateTime, String solution) {
+			String service, String serviceType, String assignedEmployee, String assignedEmployeeLogin,
+			String stateReason, Instant lastAssignmentToTeamDateTime, String solution) {
 	}
 }

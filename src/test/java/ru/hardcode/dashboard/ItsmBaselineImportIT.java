@@ -26,7 +26,7 @@ import tools.jackson.databind.node.ObjectNode;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.httpBasic;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.jwt;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -57,6 +57,7 @@ class ItsmBaselineImportIT {
 
 	@BeforeEach
 	void reset() {
+		jdbc.update("INSERT INTO users(identity_issuer,identity_subject,login,display_name) VALUES ('https://stand.test','operator','operator','Operator') ON CONFLICT DO NOTHING");
 		jdbc.execute("TRUNCATE itsm_snapshot, itsm_ingest_catalog_hint, itsm_ingest_batch, itsm_catalog_product, itsm_external_person, itsm_external_group CASCADE");
 	}
 
@@ -86,7 +87,7 @@ class ItsmBaselineImportIT {
 							 "--spring.datasource.password=" + databasePassword())) {
 			assertThat(reader.getBean(ItsmBaselineService.class).readBaseline()).isEqualTo(data);
 		}
-		mvc.perform(get("/api/itsm/incidents").with(httpBasic("operator", "kan17-test-password")))
+		mvc.perform(get("/api/itsm/incidents").with(jwt().jwt(token -> token.issuer("https://stand.test").subject("operator").claim("azp","dashboard-web"))))
 				.andExpect(status().isOk()).andExpect(jsonPath("$.count").value(44));
 	}
 

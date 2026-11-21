@@ -21,7 +21,7 @@ final class SnapshotStore {
 
     State read(String sourceId) throws IOException {
         if (Files.notExists(file)) {
-            return new State(sourceId, 0, List.of(), null, null);
+            return new State(sourceId, 0, List.of(), null, null, java.util.Set.of());
         }
         State state = json.readValue(Files.readAllBytes(file), State.class);
         if (!sourceId.equals(state.sourceId())) {
@@ -45,7 +45,9 @@ final class SnapshotStore {
     }
 
     record State(String sourceId, long deliveredVersion, List<Map<String, Object>> rows, Package pending,
-                 String rejection) {}
+                 String rejection, java.util.Set<String> manualStates) {
+        State { manualStates = manualStates == null ? java.util.Set.of() : java.util.Set.copyOf(manualStates); }
+    }
 
     record Package(long version, String batchId, byte[] body) {}
 }

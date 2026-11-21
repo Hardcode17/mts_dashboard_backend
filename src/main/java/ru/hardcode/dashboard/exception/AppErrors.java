@@ -3,6 +3,8 @@ package ru.hardcode.dashboard.exception;
 import org.springframework.http.HttpStatus;
 
 public enum AppErrors implements AppError {
+	COORDINATOR_AUTH_REQUIRED("COORDINATOR_AUTH_REQUIRED", HttpStatus.UNAUTHORIZED, "A valid user bearer token is required"),
+	COORDINATOR_ACCESS_DENIED("COORDINATOR_ACCESS_DENIED", HttpStatus.FORBIDDEN, "Coordinator access is not granted"),
 	RESOURCE_NOT_FOUND("RESOURCE_NOT_FOUND", HttpStatus.NOT_FOUND, "Resource with id ${id} not found"),
 	REQUEST_BODY_TOO_LARGE("REQUEST_BODY_TOO_LARGE", HttpStatus.CONTENT_TOO_LARGE, "Request body exceeds ${maxBytes} bytes"),
 	INVALID_REQUEST_BODY("INVALID_REQUEST_BODY", HttpStatus.BAD_REQUEST, "Request body is malformed or missing"),
@@ -30,7 +32,6 @@ public enum AppErrors implements AppError {
 	ITSM_MACHINE_AUTH_REQUIRED("ITSM_MACHINE_AUTH_REQUIRED", HttpStatus.UNAUTHORIZED, "Machine bearer token is required"),
 	ITSM_MACHINE_ACCESS_DENIED("ITSM_MACHINE_ACCESS_DENIED", HttpStatus.FORBIDDEN, "Machine client identity or itsm import permission is missing"),
 	HUMAN_AUTH_REQUIRED("HUMAN_AUTH_REQUIRED", HttpStatus.UNAUTHORIZED, "Human access token is required"),
-	HUMAN_ACCESS_DENIED("HUMAN_ACCESS_DENIED", HttpStatus.FORBIDDEN, "The access token does not grant access to this resource"),
 	AUTH_REQUIRED("AUTH_REQUIRED", HttpStatus.UNAUTHORIZED, "Authentication is required"),
 	INVALID_GROUP("INVALID_GROUP", HttpStatus.BAD_REQUEST, "Unknown dashboard group ${group}"),
 	INVALID_CURSOR("INVALID_CURSOR", HttpStatus.BAD_REQUEST, "cursor is not a valid list cursor"),
@@ -38,6 +39,10 @@ public enum AppErrors implements AppError {
 	INVALID_INCIDENT_ID("INVALID_INCIDENT_ID", HttpStatus.BAD_REQUEST,
 			"incidentId must be an INC identifier such as INC000021095531"),
 	INCIDENT_NOT_FOUND("INCIDENT_NOT_FOUND", HttpStatus.NOT_FOUND, "Incident${incident} not found"),
+	INCIDENT_PATCH_INVALID("INCIDENT_PATCH_INVALID", HttpStatus.BAD_REQUEST, "Invalid incident update"),
+	INCIDENT_CONFLICT("INCIDENT_CONFLICT", HttpStatus.CONFLICT, "Incident update conflicts with the current state"),
+	ITSM_BAD_RESPONSE("ITSM_BAD_RESPONSE", HttpStatus.BAD_GATEWAY, "Invalid response from ITSM"),
+	ITSM_OFFLINE("ITSM_OFFLINE", HttpStatus.SERVICE_UNAVAILABLE, "ITSM is unavailable"),
 	MCP_EVIDENCE_ACCESS_DENIED("MCP_EVIDENCE_ACCESS_DENIED", HttpStatus.FORBIDDEN, "Caller is not allowed to read MCP evidence"),
 	MCP_EVIDENCE_DEMO_SCENARIO_UNKNOWN("MCP_EVIDENCE_DEMO_SCENARIO_UNKNOWN", HttpStatus.NOT_FOUND, "MCP evidence demo scenario ${scenarioId} is not a mapped demo scenario"),
 	MCP_EVIDENCE_INCIDENT_NOT_MAPPED("MCP_EVIDENCE_INCIDENT_NOT_MAPPED", HttpStatus.NOT_FOUND, "Incident ${incidentId} has no explicit mapping to a scenario run"),

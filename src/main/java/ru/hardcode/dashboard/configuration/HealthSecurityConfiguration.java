@@ -21,12 +21,14 @@ public class HealthSecurityConfiguration {
 	private static final MediaType CSV = MediaType.valueOf("text/csv");
 
 	/**
-	 * Default chain for health and local browser pages. {@code /health} is open and the rest
-	 * keeps the original form login and HTTP Basic rules for local access. The API itself is
-	 * handled by the ordered Bearer JWT chains above ({@code /api/**}).
+	 * Default chain for health and local browser pages. {@code /health} is open; the human API
+	 * itself is handled by the ordered Bearer JWT chains above ({@code /api/**}). Any /api
+	 * request that still reaches this fallback chain requires coordinator access as well, so a
+	 * chain misconfiguration cannot silently expose the API.
 	 */
 	@Bean
-	SecurityFilterChain securityFilterChain(HttpSecurity http, ObjectMapper objectMapper) throws Exception {
+	SecurityFilterChain securityFilterChain(HttpSecurity http, ObjectMapper objectMapper,
+			CoordinatorAuthorizationManager coordinatorAccess, CoordinatorSecurityErrors errors) throws Exception {
 		var accept = new HeaderContentNegotiationStrategy();
 		RequestMatcher apiAccept = request -> {
 			try {
@@ -47,10 +49,17 @@ public class HealthSecurityConfiguration {
 		return http
 				.authorizeHttpRequests(authorize -> authorize
 						.requestMatchers(HttpMethod.GET, "/health").permitAll()
+						.requestMatchers("/api/**").access(coordinatorAccess)
 						.anyRequest().authenticated())
-				.exceptionHandling(exceptions -> exceptions.defaultAuthenticationEntryPointFor(
-						(request, response, error) -> ApiErrorWriter.write(response, objectMapper, AppErrors.AUTH_REQUIRED),
-						new AndRequestMatcher(HumanApiSecurityConfiguration.DASHBOARD_INCIDENTS, apiAccept)))
+				.exceptionHandling(exceptions -> {
+					// API clients receive JSON errors instead of the login form redirect.
+					exceptions.defaultAuthenticationEntryPointFor(
+							(request, response, error) -> ApiErrorWriter.write(response, objectMapper, AppErrors.AUTH_REQUIRED),
+							new AndRequestMatcher(HumanApiSecurityConfiguration.DASHBOARD_INCIDENTS, apiAccept));
+					exceptions.defaultAuthenticationEntryPointFor(errors.authenticationEntryPoint(),
+							request -> request.getRequestURI().startsWith(request.getContextPath() + "/api/"));
+					exceptions.accessDeniedHandler(errors.accessDeniedHandler());
+				})
 				.httpBasic(Customizer.withDefaults())
 				.formLogin(Customizer.withDefaults())
 				.build();
