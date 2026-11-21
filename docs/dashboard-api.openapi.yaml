@@ -76,6 +76,25 @@ info:
     `machineBearer` (предлагается). В KAN-27 машинная цепочка с правом импорта действует
     только на `/api/integrations/itsm/**`.
 
+    ## Подключение браузерного SPA (KAN-64)
+
+    Фронтенд (React + Vite) ходит на `/api/**` со своего origin и авторизуется
+    Authorization Code + PKCE через публичный клиент `dashboard-web`; полученный access
+    token отправляется в `Authorization: Bearer`. Кросс-доменные запросы браузера
+    обслуживает CORS-конфигурация человеческой цепочки:
+
+    - разрешённые origins — env `APP_CORS_ALLOWED_ORIGINS` (через запятую), по умолчанию
+      dev-origins `http://localhost:3000,http://localhost:5173`;
+    - методы `GET/POST/PATCH/PUT/DELETE/OPTIONS`; заголовки запроса `Authorization`,
+      `Content-Type`, `If-None-Match`, `X-Request-Id`; preflight `OPTIONS` проходит без
+      аутентификации и кешируется на час;
+    - браузеру доступны заголовки ответа `ETag`, `Location`, `X-Request-Id`;
+    - чужой origin не получает `Access-Control-Allow-Origin` (403 без CORS-заголовков);
+      ответ без токена — `401`.
+
+    Машинная цепочка `/api/integrations/itsm/**` CORS не открывает: приём снимков —
+    серверный маршрут вне браузера. Подробности подключения — `docs/spa-access.md`.
+
     ## Ошибки
 
     JSON-ошибки — `ErrorResponse` (`code`, `message`), как во всём приложении. Развёрнутая

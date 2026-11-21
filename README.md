@@ -89,6 +89,11 @@ unset token
 
 Подробности о допуске и отзыве доступа есть в [инструкции координатора](docs/coordinator-access.md).
 
+Отдельно стоящий фронт (React + Vite) подключается к этому API с `http://localhost:5173`
+(dev-сервер) или `http://localhost:3000` (локальный build): оба origin уже входят в CORS
+по умолчанию, а `APP_CORS_ALLOWED_ORIGINS` задаёт свой список через запятую. Полная схема
+подключения SPA — origin, auth flow, env — в [инструкции подключения фронтенда](docs/spa-access.md).
+
 
 Чтобы подключить внешний Keycloak к `compose.work.yaml`, задайте в рабочем env-файле
 `APP_AUTH_HUMAN_ISSUER` (точное значение `iss`, доступное браузеру),
@@ -98,6 +103,8 @@ unset token
 `ITSM_INTEGRATION_AUTH_ISSUER`, `ITSM_INTEGRATION_AUTH_JWK_SET_URI`,
 `ITSM_INTEGRATION_AUTH_AUDIENCE=itsm-ingest` и `ITSM_INTEGRATION_AUTH_CLIENT_ID=itsm-sender`.
 Секрет отправителя нужен самому отправителю, бэкенд проверяет токен по публичным ключам.
+CORS-origins браузерного SPA задаются `APP_CORS_ALLOWED_ORIGINS` (по умолчанию
+`http://localhost:3000,http://localhost:5173`, см. [docs/spa-access.md](docs/spa-access.md)).
 
 ## Стендовый Keycloak в продакшен-деплое
 
@@ -114,7 +121,10 @@ Settings → Secrets and variables → Actions → Variables:
 `coordinator` с паролем из `STAND_COORDINATOR_PASSWORD` runtime-файла, redirect URI
 публичного фронтенда и сгенерированный секрет `itsm-sender`. Issuer
 `STAND_KEYCLOAK_URL/realms/dashboard` попадает в `APP_AUTH_HUMAN_ISSUER` бэкенда и
-должен быть значением `FRONTEND_OIDC_AUTHORITY` в репозитории фронтенда.
+должен быть значением `FRONTEND_OIDC_AUTHORITY` в репозитории фронтенда. Origin фронтенда
+из `STAND_FRONTEND_URL` попадает в `APP_CORS_ALLOWED_ORIGINS` (KAN-64), так что браузерный
+SPA получает CORS на `/api/**`; машинный приём `/api/integrations/itsm/**` CORS не получает.
+Схема подключения — [docs/spa-access.md](docs/spa-access.md).
 
 После деплоя workflow сам выдаёт координатору локальный допуск через
 

@@ -37,8 +37,11 @@ python3 scripts/render-realm.py src/keycloak/realm/dashboard-realm.json "$AUTH_R
 
 # The auth settings follow STAND_KEYCLOAK_URL on every deploy: the repository variable is
 # the single source of truth for the issuer the browser and the backend must share.
-sed -i '/^AUTH_REALM_FILE=/d;/^APP_AUTH_HUMAN_/d' "$BACKEND_ENV_FILE"
+# CORS (KAN-64) follows STAND_FRONTEND_URL the same way, with the local dev origins kept
+# for direct browser access to the stand.
+sed -i '/^AUTH_REALM_FILE=/d;/^APP_AUTH_HUMAN_/d;/^APP_CORS_ALLOWED_ORIGINS=/d' "$BACKEND_ENV_FILE"
 printf 'AUTH_REALM_FILE=%s\n' "$AUTH_REALM_FILE" >> "$BACKEND_ENV_FILE"
 printf 'APP_AUTH_HUMAN_ISSUER=%s\n' "${STAND_KEYCLOAK_URL%/}/realms/dashboard" >> "$BACKEND_ENV_FILE"
 printf 'APP_AUTH_HUMAN_JWK_SET_URI=http://keycloak:8080/realms/dashboard/protocol/openid-connect/certs\n' >> "$BACKEND_ENV_FILE"
 printf 'APP_AUTH_HUMAN_AUDIENCE=dashboard-api\n' >> "$BACKEND_ENV_FILE"
+printf 'APP_CORS_ALLOWED_ORIGINS=%s,http://localhost:3000,http://localhost:5173\n' "${STAND_FRONTEND_URL%/}" >> "$BACKEND_ENV_FILE"

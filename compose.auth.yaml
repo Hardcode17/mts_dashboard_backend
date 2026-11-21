@@ -50,6 +50,7 @@ services:
       APP_AUTH_HUMAN_ISSUER: http://localhost:${KEYCLOAK_PORT:-8084}/realms/dashboard
       APP_AUTH_HUMAN_JWK_SET_URI: http://keycloak:8080/realms/dashboard/protocol/openid-connect/certs
       APP_AUTH_HUMAN_AUDIENCE: dashboard-api
+      APP_CORS_ALLOWED_ORIGINS: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:5173}
       ITSM_INTEGRATION_AUTH_ISSUER: http://localhost:${KEYCLOAK_PORT:-8084}/realms/dashboard
       ITSM_INTEGRATION_AUTH_JWK_SET_URI: http://keycloak:8080/realms/dashboard/protocol/openid-connect/certs
       ITSM_INTEGRATION_AUTH_AUDIENCE: itsm-ingest
