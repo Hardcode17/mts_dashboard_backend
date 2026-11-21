@@ -116,6 +116,23 @@ class CoordinationTaskQueueIT {
 	}
 
 	@Test
+	void claimedTaskMovesFromTheSharedQueueToMine() throws Exception {
+		deliver(1, incident("INC1", "Other", "baseline"));
+		deliver(2, incident("INC1", "Target", "entered"));
+		String bearer = "Bearer " + token("kan24");
+		long taskId = jdbc.queryForObject("SELECT id FROM coordination_tasks WHERE incident_id = 'INC1'", Long.class);
+		mvc.perform(get(PATH).header(HttpHeaders.AUTHORIZATION, bearer)).andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].taskId").value(taskId));
+		mvc.perform(post(PATH + "/{id}/claim", taskId).header(HttpHeaders.AUTHORIZATION, bearer))
+				.andExpect(status().isOk()).andExpect(jsonPath("$.incidentId").value("INC1"));
+		mvc.perform(get(PATH).header(HttpHeaders.AUTHORIZATION, bearer)).andExpect(status().isOk())
+				.andExpect(jsonPath("$").isEmpty());
+		mvc.perform(get(PATH + "/mine").header(HttpHeaders.AUTHORIZATION, bearer)).andExpect(status().isOk())
+				.andExpect(jsonPath("$[0].taskId").value(taskId));
+		assertThat(count()).isOne();
+	}
+
+	@Test
 	void concurrentInsertionsHaveExactlyOneWinner() throws Exception {
 		deliver(1, incident("INC1", "Other", "baseline"));
 		try (var executor = Executors.newFixedThreadPool(12)) {

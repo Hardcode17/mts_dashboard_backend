@@ -20,10 +20,11 @@ and no coordinator or timer is assigned. Task completion and claiming are outsid
 Before applying V12.1 to an existing database, resolve any pre-existing duplicate open tasks:
 the migration deliberately fails rather than silently deleting or closing user data.
 
+KAN-85 adds ownership; this shared queue only lists tasks without an owner.
+
 The confirmed REST snapshot is processed in `ItsmSnapshotPublicationService.process`:
 after `domain.upsertDomain`, it calls `CoordinationTaskService.observeEntries` in the same
 transaction. The insertion method `CoordinationTaskRepository.insertOpen` is the shared
 extension point for a future official transfer (KAN-32). The existing
 `DashboardIncidentService.patch` has its own task-completion behaviour, which KAN-32 must
-reconcile with its official transfer rules. After KAN-85 introduces `coordinator_id` in V14,
-the indicated predicate in `listOpen` must be extended to exclude owned tasks.
+reconcile with its official transfer rules.
