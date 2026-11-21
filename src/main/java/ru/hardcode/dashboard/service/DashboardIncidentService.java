@@ -28,6 +28,7 @@ import ru.hardcode.dashboard.exception.AppException;
 import ru.hardcode.dashboard.exception.DashboardIncidentNotFoundException;
 import ru.hardcode.dashboard.repository.DashboardIncidentRepository;
 import ru.hardcode.dashboard.repository.DashboardIncidentRepository.IncidentRow;
+import ru.hardcode.dashboard.repository.IncidentLinkRepository;
 import ru.hardcode.dashboard.repository.ItsmBaselineRepository;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
@@ -51,10 +52,11 @@ public class DashboardIncidentService {
 	private final ItsmBaselineRepository domain;
 	private final ItsmIncidentSnapshotParser parser;
 	private final ItsmSnapshotMapper mapper;
+	private final IncidentLinkRepository incidentLinks;
 
 	public DashboardIncidentService(DashboardIncidentRepository repository, DashboardItsmLink itsmLink, Clock clock,
 			JdbcTemplate db, ObjectMapper json, ItsmApiClient itsm, ItsmBaselineRepository domain,
-			ItsmIncidentSnapshotParser parser, ItsmSnapshotMapper mapper) {
+			ItsmIncidentSnapshotParser parser, ItsmSnapshotMapper mapper, IncidentLinkRepository incidentLinks) {
 		this.repository = repository;
 		this.itsmLink = itsmLink;
 		this.clock = clock;
@@ -64,13 +66,12 @@ public class DashboardIncidentService {
 		this.domain = domain;
 		this.parser = parser;
 		this.mapper = mapper;
+		this.incidentLinks = incidentLinks;
 	}
 
 	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 	public DashboardIncidentCardResponse card(String incidentId) {
-		if (!INCIDENT_ID.matcher(incidentId).matches()) {
-			throw new AppException(AppErrors.INVALID_INCIDENT_ID);
-		}
+		validateIncidentId(incidentId);
 		var published = repository.publication();
 		if (published.eventSeq() == 0) {
 			throw new DashboardIncidentNotFoundException(incidentId, 0, 0);
@@ -87,7 +88,7 @@ public class DashboardIncidentService {
 				card.lastAssignmentToTeamDateTime(), incident.deadline(), incident.completionDate(), card.solution(),
 				remaining == null ? null : remaining.getSeconds(), remaining != null && remaining.isNegative(),
 				itsmLink.forIncident(incident.id()), itsmLink.demo(), DashboardIncidentGroup.memberships(incident),
-				published.eventSeq(), published.revision());
+				incidentLinks.findForIncident(incidentId), published.eventSeq(), published.revision());
 	}
 
 	/**
@@ -97,10 +98,14 @@ public class DashboardIncidentService {
 	private record PublishedRow(Map<String, Object> row, String source) {
 	}
 
-	private PublishedRow publishedRow(String incidentId) {
-		if (!INCIDENT_ID.matcher(incidentId).matches()) {
+	static void validateIncidentId(String incidentId) {
+		if (incidentId == null || !INCIDENT_ID.matcher(incidentId).matches()) {
 			throw new AppException(AppErrors.INVALID_INCIDENT_ID);
 		}
+	}
+
+	private PublishedRow publishedRow(String incidentId) {
+		validateIncidentId(incidentId);
 		var publication = repository.publication();
 		return db.query("""
 				SELECT i.source_data, i.source_id FROM itsm_incident i

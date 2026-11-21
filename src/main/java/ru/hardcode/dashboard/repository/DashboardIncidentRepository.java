@@ -57,6 +57,12 @@ public class DashboardIncidentRepository {
 						instant(rs, "changed_at"), instant(rs, "latest_source_date"))).list();
 	}
 
+	public boolean isPublished(String incidentId) {
+		return jdbc.sql("SELECT EXISTS (SELECT 1 " + INCIDENTS_FROM
+				+ "WHERE incident.present_in_source AND incident.id = :id)")
+				.param("id", incidentId).query(Boolean.class).single();
+	}
+
 	public Optional<CardRow> findCard(String incidentId) {
 		return jdbc.sql("""
 				SELECT incident.id, product.product_key, team.group_name, incident.state, incident.priority_id,

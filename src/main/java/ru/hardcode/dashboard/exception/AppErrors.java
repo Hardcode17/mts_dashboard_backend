@@ -39,6 +39,8 @@ public enum AppErrors implements AppError {
 	INVALID_INCIDENT_ID("INVALID_INCIDENT_ID", HttpStatus.BAD_REQUEST,
 			"incidentId must be an INC identifier such as INC000021095531"),
 	INCIDENT_NOT_FOUND("INCIDENT_NOT_FOUND", HttpStatus.NOT_FOUND, "Incident${incident} not found"),
+	INVALID_INCIDENT_LINK("INVALID_INCIDENT_LINK", HttpStatus.BAD_REQUEST,
+			"An incident link needs two different incidents and a supported kind"),
 	INCIDENT_PATCH_INVALID("INCIDENT_PATCH_INVALID", HttpStatus.BAD_REQUEST, "Invalid incident update"),
 	INCIDENT_CONFLICT("INCIDENT_CONFLICT", HttpStatus.CONFLICT, "Incident update conflicts with the current state"),
 	ITSM_BAD_RESPONSE("ITSM_BAD_RESPONSE", HttpStatus.BAD_GATEWAY, "Invalid response from ITSM"),

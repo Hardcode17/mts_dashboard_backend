@@ -674,6 +674,7 @@ paths:
                     overdue: false
                     itsmUrl: 'http://127.0.0.1:8082/itsm_incident/INC000021931151/page'
                     itsmDemo: true
+                    confirmedLinks: []
                     groupMemberships: []
                     eventSeq: 2
                     revision: 1
@@ -803,6 +804,7 @@ paths:
                     overdue: false
                     itsmUrl: 'http://127.0.0.1:8082/api/mock/incidents/INC000021095532'
                     itsmDemo: true
+                    confirmedLinks: []
                     groupMemberships:
                       - group: coordinator
                         matchedRule: assignedToCoordinators
@@ -835,6 +837,7 @@ paths:
                     overdue: false
                     itsmUrl: 'http://127.0.0.1:8082/api/mock/incidents/INC000021095539'
                     itsmDemo: true
+                    confirmedLinks: []
                     groupMemberships:
                       - group: coordinator
                         matchedRule: assignedToCoordinators
@@ -867,6 +870,7 @@ paths:
                     overdue: false
                     itsmUrl: 'http://127.0.0.1:8082/api/mock/incidents/INC000021095537'
                     itsmDemo: true
+                    confirmedLinks: []
                     groupMemberships: []
                     eventSeq: 43
                     revision: 42
@@ -913,6 +917,94 @@ paths:
                     message: Incident not found
                     eventSeq: 0
                     revision: 0
+  '/api/dashboard/incidents/{incidentId}/confirmed-links':
+    post:
+      operationId: confirmIncidentLink
+      summary: Подтвердить связь двух инцидентов (KAN-41)
+      description: |
+        Подтверждает связь двух опубликованных INC от имени координатора.
+        У related_to номера упорядочены по возрастанию. У causes и duplicate_of
+        направление идёт от INC в пути к INC в теле. Повтор возвращает ту же связь
+        с исходными автором и временем. Связь видна в обеих карточках.
+      security: [{coordinatorBearer: []}]
+      parameters:
+        - {name: incidentId, in: path, required: true, schema: {$ref: '#/components/schemas/IncidentId'}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetIncidentId, kind]
+              properties:
+                targetIncidentId: {$ref: '#/components/schemas/IncidentId'}
+                kind: {$ref: '#/components/schemas/IncidentLinkKind'}
+            examples:
+              relatedTo:
+                summary: Подтвердить симметричную связь
+                value: {targetIncidentId: INC000021095532, kind: related_to}
+      responses:
+        '200':
+          description: Сохранённая связь, включая результат повтора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConfirmedIncidentLink'}
+              examples:
+                relatedTo:
+                  summary: Подтверждённая связь с автором и временем
+                  value:
+                    id: 21
+                    sourceIncidentId: INC000021095531
+                    targetIncidentId: INC000021095532
+                    kind: related_to
+                    confirmedByUserId: 7
+                    createdAt: '2026-11-21T09:00:00Z'
+        '400':
+          description: Недопустимые номер, тип связи или тело запроса.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                selfLink:
+                  summary: Инцидент нельзя связать с собой
+                  value: {code: INVALID_INCIDENT_LINK, message: An incident link needs two different incidents and a supported kind}
+                invalidId:
+                  summary: Неверный формат номера
+                  value: {code: INVALID_INCIDENT_ID, message: incidentId must be an INC identifier such as INC000021095531}
+                invalidBody:
+                  summary: Неверный синтаксис запроса
+                  value: {code: INVALID_REQUEST_BODY, message: Request body is malformed or missing}
+        '401':
+          description: Нет действительного Bearer JWT.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                missingToken:
+                  summary: Нет токена координатора
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Пользователь не допущен к рабочему месту координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                noAccess:
+                  summary: Нет локального допуска
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+        '404':
+          description: Один из INC отсутствует в опубликованных данных.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentNotFound'}
+              examples:
+                missingIncident:
+                  summary: Целевой INC не найден
+                  value:
+                    code: INCIDENT_NOT_FOUND
+                    message: Incident INC000021095532 not found
+                    eventSeq: 43
+                    revision: 42
   /api/dashboard/sources:
     get:
       operationId: listSources
@@ -1273,6 +1365,20 @@ components:
           items:
             $ref: '#/components/schemas/IncidentGroupMembership'
       additionalProperties: false
+    IncidentLinkKind:
+      type: string
+      enum: [related_to, causes, duplicate_of]
+    ConfirmedIncidentLink:
+      type: object
+      additionalProperties: false
+      required: [id, sourceIncidentId, targetIncidentId, kind, confirmedByUserId, createdAt]
+      properties:
+        id: {type: integer, format: int64, minimum: 1}
+        sourceIncidentId: {$ref: '#/components/schemas/IncidentId'}
+        targetIncidentId: {$ref: '#/components/schemas/IncidentId'}
+        kind: {$ref: '#/components/schemas/IncidentLinkKind'}
+        confirmedByUserId: {type: integer, format: int64, minimum: 1}
+        createdAt: {$ref: '#/components/schemas/UtcInstant'}
     IncidentCard:
       type: object
       description: Карточка INC (карточка в ITSM).
@@ -1288,9 +1394,14 @@ components:
         - itsmUrl
         - itsmDemo
         - groupMemberships
+        - confirmedLinks
         - eventSeq
         - revision
       properties:
+        confirmedLinks:
+          type: array
+          description: Подтверждённые координаторами связи с участием этого INC по возрастанию ID.
+          items: {$ref: '#/components/schemas/ConfirmedIncidentLink'}
         itsmUrl: {type: string, format: uri}
         remainingSeconds: {type: [integer, 'null']}
         overdue: {type: boolean}

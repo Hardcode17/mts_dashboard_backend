@@ -20,6 +20,7 @@
   "overdue": false,
   "itsmUrl": "http://127.0.0.1:8082/api/mock/incidents/INC000021095537",
   "itsmDemo": true,
+  "confirmedLinks": [],
   "groupMemberships": [],
   "eventSeq": 43,
   "revision": 42
