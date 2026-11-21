@@ -36,10 +36,9 @@ public class CoordinationTaskRepository {
 	}
 
 	public List<Task> listOpen() {
-		// KAN-85: add AND coordinator_id IS NULL here after V14 introduces ownership.
 		return jdbc.query("""
 				SELECT id, incident_id, created_at FROM coordination_tasks
-				WHERE status = 'open' ORDER BY created_at, id
+				WHERE status = 'open' AND coordinator_id IS NULL ORDER BY created_at, id
 				""", (rs, n) -> new Task(rs.getLong("id"), rs.getString("incident_id"),
 				rs.getTimestamp("created_at").toInstant()));
 	}
