@@ -34,6 +34,7 @@ import ru.hardcode.dashboard.exception.DashboardIncidentNotFoundException;
 import ru.hardcode.dashboard.repository.DashboardIncidentRepository;
 import ru.hardcode.dashboard.repository.DashboardIncidentRepository.IncidentRow;
 import ru.hardcode.dashboard.repository.ItsmBaselineRepository;
+import ru.hardcode.dashboard.service.deadlinerisk.DeadlineRiskService;
 import tools.jackson.core.type.TypeReference;
 import tools.jackson.databind.ObjectMapper;
 import ru.hardcode.dashboard.repository.DashboardIncidentRepository.RelationshipNode;
@@ -57,10 +58,11 @@ public class DashboardIncidentService {
 	private final ItsmBaselineRepository domain;
 	private final ItsmIncidentSnapshotParser parser;
 	private final ItsmSnapshotMapper mapper;
+	private final DeadlineRiskService deadlineRisk;
 
 	public DashboardIncidentService(DashboardIncidentRepository repository, DashboardItsmLink itsmLink, Clock clock,
 			JdbcTemplate db, ObjectMapper json, ItsmApiClient itsm, ItsmBaselineRepository domain,
-			ItsmIncidentSnapshotParser parser, ItsmSnapshotMapper mapper) {
+			ItsmIncidentSnapshotParser parser, ItsmSnapshotMapper mapper, DeadlineRiskService deadlineRisk) {
 		this.repository = repository;
 		this.itsmLink = itsmLink;
 		this.clock = clock;
@@ -70,6 +72,7 @@ public class DashboardIncidentService {
 		this.domain = domain;
 		this.parser = parser;
 		this.mapper = mapper;
+		this.deadlineRisk = deadlineRisk;
 	}
 
 	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
@@ -93,7 +96,7 @@ public class DashboardIncidentService {
 				card.lastAssignmentToTeamDateTime(), incident.deadline(), incident.completionDate(), card.solution(),
 				remaining == null ? null : remaining.getSeconds(), remaining != null && remaining.isNegative(),
 				itsmLink.forIncident(incident.id()), itsmLink.demo(), DashboardIncidentGroup.memberships(incident),
-				published.eventSeq(), published.revision());
+				deadlineRisk.cardRisk(incident, clock.instant()), published.eventSeq(), published.revision());
 	}
 
 	/**

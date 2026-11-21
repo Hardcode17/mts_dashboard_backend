@@ -21,6 +21,17 @@
   "itsmUrl": "http://127.0.0.1:8082/api/mock/incidents/INC000021095537",
   "itsmDemo": true,
   "groupMemberships": [],
+  "deadlineRisk": {
+    "risk": "unknown",
+    "evaluatedAt": "2026-11-21T10:00:00Z",
+    "reasons": [
+      {
+        "code": "not_active",
+        "text": "Карточка завершена — риск не оценивается"
+      }
+    ],
+    "score": null
+  },
   "eventSeq": 43,
   "revision": 42
 }

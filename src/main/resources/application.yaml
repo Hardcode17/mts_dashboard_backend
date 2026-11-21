@@ -32,6 +32,33 @@ dashboard:
     connect-timeout: ${DASHBOARD_ITSM_CONNECT_TIMEOUT:PT2S}
     read-timeout: ${DASHBOARD_ITSM_READ_TIMEOUT:PT5S}
 
+deadline-risk:
+  # KAN-82 model constants. PLACEHOLDER values: real coefficients and thresholds come from the
+  # offline KAN-81 training (UCI ServiceNow) and replace these numbers as a single config edit —
+  # the code never changes between trainings.
+  # score = w0 + w1*x1 + … + w7*x7 with x1 = service × priority × group median resolution hours
+  # (falling back to group × priority, then group when history is missing) / hours left until
+  # the deadline, x2 = deadline extensions, x3 = reassignments, x4 = reopenings,
+  # x5 = hours without a status change, x6 = assignee's open incidents, x7 = priorityId (1-4).
+  weights:
+    w0: -1.0
+    w1: 1.0
+    w2: 1.0
+    w3: 0.5
+    w4: 1.0
+    w5: 0.05
+    w6: 0.1
+    w7: 0.25
+  # Category boundaries on the raw score: >= high is high, >= medium is medium, otherwise low.
+  thresholds:
+    medium: 0.0
+    high: 1.0
+  # When a feature becomes a named reason of the assessment.
+  reasons:
+    stale-status-hours: 24
+    assignee-open-threshold: 5
+
+
 coordinator:
   access:
     user-client-ids: ${COORDINATOR_USER_CLIENT_IDS:dashboard-web}

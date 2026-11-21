@@ -13,6 +13,6 @@ public record DashboardIncidentCardResponse(
 		String assignedEmployee, ItsmIncidentState stateEnum, String stateReason, int priorityId, Instant submitDate,
 		Instant lastAssignmentToTeamDateTime, Instant deadline, Instant completionDate, String solution,
 		Long remainingSeconds, boolean overdue, URI itsmUrl, boolean itsmDemo,
-		List<Membership> groupMemberships, long eventSeq, long revision
+		List<Membership> groupMemberships, DeadlineRiskResponse deadlineRisk, long eventSeq, long revision
 ) {
 }
