@@ -17,6 +17,7 @@ public record ItsmBatchMetadataResponse(
 		Instant receivedAt,
 		ItsmBatchStatus status,
 		String diagnostic,
-		Instant nextAttemptAt
+		Instant nextAttemptAt,
+		Long waitingForVersion
 ) {
 }

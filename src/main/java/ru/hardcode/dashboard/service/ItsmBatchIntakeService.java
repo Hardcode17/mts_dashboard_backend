@@ -83,10 +83,10 @@ public class ItsmBatchIntakeService {
 		if (existingBySourceVersion.isPresent()) {
 			throw new AppException(AppErrors.ITSM_SOURCE_VERSION_CONFLICT);
 		}
-
-		if (sqlRepository.countOutstanding() >= maxOutstandingBatches) {
-			throw new AppException(AppErrors.ITSM_INTAKE_QUEUE_FULL, Map.of("max", maxOutstandingBatches));
+		if (sqlRepository.isSourcePublishingBaseline(validatedSourceId)) {
+			throw new AppException(AppErrors.ITSM_SOURCE_INITIALIZING);
 		}
+		checkCapacity(validatedSourceId, validatedSourceVersion);
 
 		Instant receivedAt = Instant.now();
 		boolean inserted = sqlRepository.insert(
@@ -113,6 +113,28 @@ public class ItsmBatchIntakeService {
 			throw new AppException(AppErrors.ITSM_SOURCE_VERSION_CONFLICT);
 		}
 		throw new AppException(AppErrors.ITSM_IDEMPOTENCY_CONFLICT);
+	}
+
+	@Transactional
+	public void retry(UUID batchId) {
+		sqlRepository.lockIntake();
+		var batch = sqlRepository.findMetadata(batchId).orElseThrow(() ->
+				new AppException(AppErrors.ITSM_BATCH_NOT_FOUND, Map.of("batchId", batchId)));
+		checkCapacity(batch.sourceId(), batch.sourceVersion());
+		if (!sqlRepository.requeueTechnicalFailure(batchId)) {
+			throw new AppException(AppErrors.ITSM_BATCH_NOT_RETRYABLE);
+		}
+		notifyWorkerAfterCommit();
+	}
+
+	private void checkCapacity(String sourceId, long sourceVersion) {
+		long outstanding = sqlRepository.countOutstanding();
+		// One bounded extra slot lets a missing predecessor unblock a saturated queue.
+		boolean gapRepair = maxOutstandingBatches > 0 && outstanding == maxOutstandingBatches
+				&& sqlRepository.isAwaitedVersion(sourceId, sourceVersion);
+		if (outstanding >= maxOutstandingBatches && !gapRepair) {
+			throw new AppException(AppErrors.ITSM_INTAKE_QUEUE_FULL, Map.of("max", maxOutstandingBatches));
+		}
 	}
 
 	/**
@@ -176,7 +198,7 @@ public class ItsmBatchIntakeService {
 		}
 	}
 
-	private static String validateSourceId(String value) {
+	static String validateSourceId(String value) {
 		if (value == null || !SOURCE_ID_PATTERN.matcher(value).matches()) {
 			throw new AppException(AppErrors.ITSM_INVALID_SOURCE_ID);
 		}

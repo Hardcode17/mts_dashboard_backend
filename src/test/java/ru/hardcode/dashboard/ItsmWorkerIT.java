@@ -33,6 +33,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * accepted batches become claimable.
  */
 @SpringBootTest(properties = {
+		"itsm.publication.enabled=false",
 		"itsm.integration.auth.issuer=" + ItsmMachineJwtTestConfiguration.ISSUER,
 		"itsm.integration.auth.jwk-set-uri=https://keycloak.test/realms/itsm/protocol/openid-connect/certs",
 		"itsm.integration.auth.audience=" + ItsmMachineJwtTestConfiguration.AUDIENCE,

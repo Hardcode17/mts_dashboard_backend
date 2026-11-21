@@ -8,11 +8,13 @@ info:
     Каждая операция описана один раз — в `paths`, по своему маршруту: `POST /api/integrations/itsm/batches` — машина ITCS передаёт полный снимок (машинный Bearer, массив INC, идентификатор и версия пакета в заголовках, `202` с `Location`); `GET /api/integrations/itsm/batches/{batchId}` — чтение состояния пакета; `GET /api/snapshot/status` — опубликованная версия и свежесть. Это общий для всех операций маршрут чтения (§ "Один канонический маршрут для каждого чтения").
     Исходящее событие того же приёма опубликовано отдельно в `webhooks` с теми же схемами и примерами (`POST /api/integrations/itsm/batches`). Семантика события остаётся webhook-овой и не зависит от того, в каком разделе её показывают.
     ## Что уже развёрнуто, а что предлагается
-    - Развёрнуто (KAN-27): `POST /api/integrations/itsm/batches`, `GET /api/integrations/itsm/batches/{batchId}` и `GET /api/snapshot/status`. Приложение публикует свой OpenAPI-документ (`/swagger-ui.html`, `/api-docs.yaml`). - Ветка KAN-53 (`itsm-mock`) совпадает с приёмником по пути, трём заголовкам, массиву INC и ответу `202` с `Location`; она ожидает необязательное `payload` в `202`/`409`. - Предлагается, но не развёрнуто: `payload`, `Idempotent-Replayed`, `application/problem+json` для `422`, машинный Bearer для `GET /api/snapshot/status` (`machineBearerProspective`). Сейчас статус открыт цепочкой формы и HTTP Basic (`form-or-basic`). - Чтения KAN-7 (список, карточка, статус источника, polling, ack) — отдельный документ `dashboard-api.openapi.yaml`. Их контроллеров пока нет.
+    - KAN-27 и KAN-55 реализуют приём, асинхронную публикацию и статус. Семантическая ошибка записи появляется после `202` как терминальный `FAILED` по `Location`, а не как HTTP `422`.
+    - Клиент KAN-53 (`itsm-mock`) использует тот же POST, заголовки и массив INC. Предлагаемые `payload` и `Idempotent-Replayed` не возвращаются приёмником.
+    - Общее состояние снимка и диагностический маршрут источника используют цепочку приложения. Чтения карточки, списка, polling и ack описаны отдельно в `dashboard-api.openapi.yaml`.
     ## Каждые 30 секунд — полный снимок, а не список изменений
     Подтверждённый контракт ITCS: отправитель каждые 30 секунд передаёт полный снимок текущей выгрузки — все INC, включая неизменившиеся. Это не дельта. Примеры `minimal` и `nextTick` отличаются ровно одним INC (`INC000021095533`).
     ## Версия источника, revision и eventSeq
-    `X-Source-Version` — версия выгрузки отправителя (**sourceVersion**). `revision` в `GET /api/snapshot/status` — **опубликованная** версия источника, которую видит фронт (`null` до первой успешной обработки). `eventSeq` (KAN-7) — счётчик изменений опубликованных данных. Это три разные величины: `202` не публикует данные.
+    `X-Source-Version` — версия выгрузки отправителя (**sourceVersion**). `revision` в `GET /api/snapshot/status` — наибольшая опубликованная ревизия изменений (`null` до первого успешного применения). Неизменившийся снимок подтверждает наблюдение, не повышая ревизию. `eventSeq` (KAN-7) — отдельный курсор событий. `202` не публикует данные.
     ## Ошибки
     Все JSON-ошибки — `ErrorResponse` (`code`, `message`) и `X-Request-Id`. Коды стабильны, тексты `message` — нет.
     ## Примеры
@@ -195,19 +197,8 @@ paths:
                 unsupportedMediaType:
                   summary: Content-Type не application/json
                   value: {"code": "UNSUPPORTED_MEDIA_TYPE", "message": "Content type is not supported"}
-        '422':
-          description: Снимок отклонён валидатором записей до постановки в очередь. Возможен только если проверка выполняется перед записью; развёрнутая версия KAN-27 этот ответ не возвращает.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ItsmExpectedProblem'
-              examples:
-                invalidRecord:
-                  summary: 'Числовой INC отклонён (не развёрнуто, fixture ingest-problem-invalid-record)'
-                  x-fixture: ingest-problem-invalid-record
-                  value: {"type": "about:blank", "title": "ITSM snapshot was rejected", "status": 422, "code": "ITSM_INVALID_RECORD", "detail": "ITSM record in snapshot at index 0 has invalid field id: must be a string", "instance": "2026-11-21T09:05:00.123456Z"}
         '429':
-          description: 'Приёмник временно ограничил поток: очередь необработанных пакетов заполнена.'
+          description: Очередь заполнена или источник публикует первый снимок. Повторите запрос с теми же заголовками и телом.
           headers:
             Retry-After:
               required: false
@@ -266,6 +257,10 @@ paths:
                   summary: Опубликованный пакет (fixture ingest-batch-succeeded-200)
                   x-fixture: ingest-batch-succeeded-200
                   value: {"batchId": "3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11", "sourceId": "itcs-prod", "sourceVersion": 42, "receivedAt": "2026-11-21T09:05:00.123456Z", "status": "SUCCEEDED", "diagnostic": "applied snapshot revision 42", "nextAttemptAt": null}
+                invalidRecord:
+                  summary: Терминальная ошибка валидации после приёма пакета
+                  x-fixture: ingest-batch-invalid-200
+                  value: {"batchId": "3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11", "sourceId": "itcs-prod", "sourceVersion": 42, "receivedAt": "2026-11-21T09:05:00.123456Z", "status": "FAILED", "diagnostic": "ITSM_INVALID_RECORD: ITSM record in snapshot at index 0 has invalid field id: must be a string", "nextAttemptAt": null, "waitingForVersion": null}
         '401':
           description: Нет или невалиден машинный Bearer.
           headers:
@@ -305,6 +300,38 @@ paths:
         source: ITCS
         delivery: server-to-server
         webhook: '/api/integrations/itsm/batches/{batchId}'
+  '/api/integrations/itsm/batches/{batchId}/retry':
+    post:
+      operationId: retryItsmTechnicalFailure
+      summary: Повторить пакет после исчерпания технических попыток
+      security:
+        - machineBearer: []
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          schema: {type: string, format: uuid}
+      responses:
+        '202':
+          description: Исходный пакет повторно поставлен в очередь с прежним ID, версией и телом.
+          headers:
+            Location:
+              required: true
+              schema: {type: string}
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ItsmBatchAccepted'
+        '401':
+          description: Нет действительного машинного токена.
+        '403':
+          description: Нет права импорта.
+        '404':
+          description: Пакет не найден.
+        '409':
+          description: Пакет не является техническим отказом без назначенного повтора. Семантический отказ повторить нельзя.
+        '429':
+          description: Очередь заполнена.
   /api/snapshot/status:
     get:
       operationId: getSnapshotStatus
@@ -312,9 +339,10 @@ paths:
       description: |
         Состояние данных для интерфейса и отправителя. Все даты — UTC, ISO-8601 (`Z` или `+00:00`), до микросекунд.
         - `lastReceivedAt` — приём последнего пакета; `202` не означает публикацию. - `lastSuccessAt` и `revision` — последняя успешная обработка; `null`, пока успеха не было. - `stale` — `true`, пока последний принятый пакет не обработан успешно, или если новых снимков не было дольше `ITSM_INTAKE_STALE_AFTER` (по умолчанию 90 с; при снимке каждые 30 с допускается пропуск до трёх тиков).
-        `revision` — опубликованная версия источника. `eventSeq` — счётчик чтений KAN-7 (`dashboard-api.openapi.yaml`); это не одно и то же.
+        `revision` — ревизия изменения, а не версия полученного снимка или `eventSeq`.
       security:
         - form-or-basic: []
+        - humanBearer: []
         - machineBearerProspective: []
       responses:
         '200':
@@ -364,6 +392,33 @@ paths:
         source: ITCS
         delivery: server-to-server
         webhook: /api/snapshot/status
+  /api/snapshot/source-status:
+    get:
+      operationId: getItsmSourcePublicationStatus
+      summary: Версия наблюдения, ревизия и ожидаемая версия отдельного источника
+      security:
+        - form-or-basic: []
+        - humanBearer: []
+      parameters:
+        - name: sourceId
+          in: query
+          required: true
+          schema:
+            type: string
+            pattern: '^[!-~]{1,128}$'
+      responses:
+        '200':
+          description: Состояние публикации источника.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [sourceId, observedVersion, changeRevision, waitingForVersion]
+                properties:
+                  sourceId: {type: string}
+                  observedVersion: {type: [integer, 'null'], minimum: 1}
+                  changeRevision: {type: [integer, 'null'], minimum: 1}
+                  waitingForVersion: {type: [integer, 'null'], minimum: 1}
 webhooks:
   /api/integrations/itsm/batches:
     post:
@@ -542,19 +597,8 @@ webhooks:
                 unsupportedMediaType:
                   summary: Content-Type не application/json
                   value: {"code": "UNSUPPORTED_MEDIA_TYPE", "message": "Content type is not supported"}
-        '422':
-          description: Снимок отклонён валидатором записей до постановки в очередь. Возможен только если проверка выполняется перед записью; развёрнутая версия KAN-27 этот ответ не возвращает.
-          content:
-            application/problem+json:
-              schema:
-                $ref: '#/components/schemas/ItsmExpectedProblem'
-              examples:
-                invalidRecord:
-                  summary: 'Числовой INC отклонён (не развёрнуто, fixture ingest-problem-invalid-record)'
-                  x-fixture: ingest-problem-invalid-record
-                  value: {"type": "about:blank", "title": "ITSM snapshot was rejected", "status": 422, "code": "ITSM_INVALID_RECORD", "detail": "ITSM record in snapshot at index 0 has invalid field id: must be a string", "instance": "2026-11-21T09:05:00.123456Z"}
         '429':
-          description: 'Приёмник временно ограничил поток: очередь необработанных пакетов заполнена.'
+          description: Очередь заполнена или источник публикует первый снимок. Повторите запрос с теми же заголовками и телом.
           headers:
             Retry-After:
               required: false
@@ -609,6 +653,10 @@ webhooks:
                   summary: Опубликованный пакет (fixture ingest-batch-succeeded-200)
                   x-fixture: ingest-batch-succeeded-200
                   value: {"batchId": "3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11", "sourceId": "itcs-prod", "sourceVersion": 42, "receivedAt": "2026-11-21T09:05:00.123456Z", "status": "SUCCEEDED", "diagnostic": "applied snapshot revision 42", "nextAttemptAt": null}
+                invalidRecord:
+                  summary: Терминальная ошибка валидации после приёма пакета
+                  x-fixture: ingest-batch-invalid-200
+                  value: {"batchId": "3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11", "sourceId": "itcs-prod", "sourceVersion": 42, "receivedAt": "2026-11-21T09:05:00.123456Z", "status": "FAILED", "diagnostic": "ITSM_INVALID_RECORD: ITSM record in snapshot at index 0 has invalid field id: must be a string", "nextAttemptAt": null, "waitingForVersion": null}
         '401':
           description: Нет или невалиден машинный Bearer.
           headers:
@@ -651,7 +699,7 @@ webhooks:
       description: |
         Состояние данных для интерфейса и отправителя. Все даты — UTC, ISO-8601 (`Z` или `+00:00`), до микросекунд.
         - `lastReceivedAt` — приём последнего пакета; `202` не означает публикацию. - `lastSuccessAt` и `revision` — последняя успешная обработка; `null`, пока успеха не было. - `stale` — `true`, пока последний принятый пакет не обработан успешно, или если новых снимков не было дольше `ITSM_INTAKE_STALE_AFTER` (по умолчанию 90 с; при снимке каждые 30 с допускается пропуск до трёх тиков).
-        `revision` — опубликованная версия источника. `eventSeq` — счётчик чтений KAN-7 (`dashboard-api.openapi.yaml`); это не одно и то же.
+        `revision` — ревизия изменения, а не версия полученного снимка или `eventSeq`.
       security:
         - form-or-basic: []
         - machineBearerProspective: []
@@ -715,6 +763,10 @@ components:
       scheme: bearer
       description: 'Предлагается, не развёрнуто: машинная цепочка для `GET /api/snapshot/status` с теми же правилами, что `machineBearer`. '
       x-prospective: true
+    humanBearer:
+      type: http
+      scheme: bearer
+      description: Пользовательский JWT при включённой конфигурации KAN-16.
   schemas:
     IncidentId:
       type: string
@@ -736,6 +788,8 @@ components:
         - stateEnum
         - priorityId
         - submitDate
+        - productName
+        - solution
       properties:
         id:
           $ref: '#/components/schemas/IncidentId'
@@ -793,9 +847,10 @@ components:
             - string
             - 'null'
         productName:
-          type:
-            - string
-            - 'null'
+          type: string
+          minLength: 1
+          maxLength: 300
+          description: Непустое имя продукта для каталога.
         serviceType:
           type:
             - string
@@ -853,6 +908,10 @@ components:
             - $ref: '#/components/schemas/UtcInstant'
             - type: 'null'
           description: 'Время назначенного повтора; `null` — повтор не назначен.'
+        waitingForVersion:
+          type: [integer, 'null']
+          minimum: 1
+          description: Версия предшественника, которого ждёт пакет.
       additionalProperties: false
     SnapshotStatus:
       type: object
@@ -875,7 +934,7 @@ components:
             - integer
             - 'null'
           minimum: 1
-          description: 'Опубликованная версия источника; `null` до первой успешной обработки. Растёт только после публикации воркером, а не при `202`. '
+          description: 'Наибольшая опубликованная ревизия изменений; `null` до первого успешного применения. Не растёт на `202` или неизменившемся снимке.'
         stale:
           type: boolean
           description: '`true`, пока последний принятый снимок не опубликован, или снимков нет дольше `ITSM_INTAKE_STALE_AFTER`. '
@@ -895,28 +954,3 @@ components:
           type: string
           minLength: 1
       additionalProperties: false
-    ItsmExpectedProblem:
-      type: object
-      required:
-        - type
-        - title
-        - status
-        - code
-        - detail
-      description: 'Предлагаемая (не развёрнутая) ошибка проверки записей в `application/problem+json` для `422`. Коды — из `AppErrors`. '
-      properties:
-        type:
-          type: string
-          format: uri
-        title:
-          type: string
-        status:
-          type: integer
-        code:
-          type: string
-          pattern: '^[A-Z][A-Z0-9_]*$'
-        detail:
-          type: string
-        instance:
-          type: string
-      additionalProperties: true

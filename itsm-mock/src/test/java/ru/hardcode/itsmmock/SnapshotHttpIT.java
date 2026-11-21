@@ -136,10 +136,11 @@ class SnapshotHttpIT {
 
     @Test
     void expandedPoolsAndBoundaries() {
-        Instant now = Instant.parse("2026-11-21T00:00:00Z");
+        Instant now = Instant.parse("2026-11-21T00:00:00.123456789Z");
         var one = new IncidentGenerator(53, 1).next(List.of(), 1, now);
         var maximum = new IncidentGenerator(53, 500).next(List.of(), 1, now);
         assertThat(one).hasSize(1);
+        assertThat(one.getFirst().get("submitDate")).isEqualTo("2026-11-20T23:55:00.123456Z");
         assertThat(maximum).hasSize(500);
         assertThat(maximum.stream().map(row -> row.get("id"))).doesNotHaveDuplicates();
         assertThat(maximum.stream().map(row -> row.get("productName")).distinct().count()).isEqualTo(3);

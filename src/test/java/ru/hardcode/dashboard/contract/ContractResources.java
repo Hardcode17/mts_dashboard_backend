@@ -2,6 +2,7 @@ package ru.hardcode.dashboard.contract;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -30,9 +31,14 @@ final class ContractResources {
 	}
 
 	static Path directory(String directory) {
-		return Path.of(java.util.Objects.requireNonNull(
+		var resource = java.util.Objects.requireNonNull(
 				ContractResources.class.getClassLoader().getResource("openapi/" + directory),
-				"resource directory openapi/" + directory).getPath());
+				"resource directory openapi/" + directory);
+		try {
+			return Path.of(resource.toURI());
+		} catch (URISyntaxException exception) {
+			throw new IllegalStateException("Invalid URI for OpenAPI resource directory " + directory, exception);
+		}
 	}
 
 	static InputStream open(String resource) {

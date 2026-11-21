@@ -11,7 +11,7 @@ import org.springframework.context.annotation.Import;
  * the bean definitions known before regular beans are created, so a processor registered by any
  * configuration, module or test enables the worker regardless of evaluation order.
  *
- * <p>There is no fallback processor: without one the worker never starts and HTTP intake keeps
+ * <p>Without a processor the worker never starts and HTTP intake keeps
  * storing batches as {@code RECEIVED}.
  */
 @AutoConfiguration

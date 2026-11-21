@@ -71,7 +71,7 @@ public class ItsmWorkerService {
 
 	private void recordFailure(ClaimedBatch batch, Throwable cause) {
 		try {
-			boolean newerPending = sqlRepository.hasPendingNewerVersion(
+			boolean newerPending = !processor.requiresSequentialVersions() && sqlRepository.hasPendingNewerVersion(
 					batch.sourceId(), batch.sourceVersion(), batch.batchId()
 			);
 			Instant nextAttemptAt = nextAttemptAt(batch.attempt(), newerPending);
@@ -112,8 +112,8 @@ public class ItsmWorkerService {
 	}
 
 	/**
-	 * Avoid scheduling a retry when a newer batch is already queued. A newer batch can still
-	 * arrive later, so the processor must enforce version ordering at publication.
+	 * Non-sequential processors may prefer a queued newer batch. Sequential publication needs
+	 * the earlier batch to settle first, so a newer arrival cannot suppress its retry.
 	 */
 	private Instant nextAttemptAt(int attempt, boolean newerPending) {
 		if (attempt >= properties.maxAttempts() || newerPending) {

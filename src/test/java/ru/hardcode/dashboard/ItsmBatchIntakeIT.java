@@ -50,6 +50,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
 
 @SpringBootTest(properties = {
+		"itsm.worker.enabled=false",
 		"itsm.integration.auth.issuer=" + ItsmMachineJwtTestConfiguration.ISSUER,
 		"itsm.integration.auth.jwk-set-uri=https://keycloak.test/realms/itsm/protocol/openid-connect/certs",
 		"itsm.integration.auth.audience=" + ItsmMachineJwtTestConfiguration.AUDIENCE,

@@ -24,6 +24,7 @@ public class ItsmBatchSqlRepository {
 	 * Stable application-wide advisory lock key for the single ITSM intake stream.
 	 */
 	private static final long INTAKE_LOCK_KEY = 4_723_199_901_277L;
+	private static final String BASELINE_LOCK_KEY = "hashtextextended(?, 65031)";
 
 	private final JdbcTemplate jdbcTemplate;
 
@@ -39,6 +40,25 @@ public class ItsmBatchSqlRepository {
 		);
 	}
 
+	/** Intake never waits behind a cold source's first publication. */
+	public boolean isSourcePublishingBaseline(String sourceId) {
+		return Boolean.TRUE.equals(jdbcTemplate.queryForObject(
+				"SELECT NOT pg_try_advisory_xact_lock(" + BASELINE_LOCK_KEY + ")", Boolean.class, sourceId));
+	}
+
+	public void lockSourceForBaseline(String sourceId) {
+		jdbcTemplate.queryForObject("SELECT pg_advisory_xact_lock(" + BASELINE_LOCK_KEY + ")",
+				(rs, rowNum) -> Boolean.TRUE, sourceId);
+	}
+
+	public boolean requeueTechnicalFailure(UUID batchId) {
+		return jdbcTemplate.update("""
+				UPDATE itsm_ingest_batch SET status = 'RECEIVED', status_updated_at = now(),
+				    batch_attempts = 0, diagnostic = NULL
+				WHERE id = ? AND status = 'FAILED' AND next_attempt_at IS NULL AND NOT validation_rejected
+				""", batchId) == 1;
+	}
+
 	public long countOutstanding() {
 		Long count = jdbcTemplate.queryForObject(
 				"""
@@ -49,6 +69,12 @@ public class ItsmBatchSqlRepository {
 				ItsmBatchStatus.RECEIVED.name(), ItsmBatchStatus.PROCESSING.name(), ItsmBatchStatus.FAILED.name()
 		);
 		return count == null ? 0 : count;
+	}
+
+	public boolean isAwaitedVersion(String sourceId, long version) {
+		return Boolean.TRUE.equals(jdbcTemplate.queryForObject("""
+				SELECT EXISTS (SELECT 1 FROM itsm_ingest_batch WHERE source_id = ? AND waiting_for_version = ?)
+				""", Boolean.class, sourceId, version));
 	}
 
 	public boolean insert(
@@ -93,7 +119,7 @@ public class ItsmBatchSqlRepository {
 	public Optional<StoredMetadata> findMetadata(UUID id) {
 		List<StoredMetadata> rows = jdbcTemplate.query(
 				"""
-				SELECT id, source_id, source_version, received_at, status, diagnostic, next_attempt_at
+				SELECT id, source_id, source_version, received_at, status, diagnostic, next_attempt_at, waiting_for_version
 				FROM itsm_ingest_batch
 				WHERE id = ?
 				""",
@@ -104,7 +130,8 @@ public class ItsmBatchSqlRepository {
 						instant(rs, "received_at"),
 						ItsmBatchStatus.valueOf(rs.getString("status")),
 						rs.getString("diagnostic"),
-						instant(rs, "next_attempt_at")
+						instant(rs, "next_attempt_at"),
+						rs.getObject("waiting_for_version", Long.class)
 				),
 				id
 		);
@@ -130,20 +157,23 @@ public class ItsmBatchSqlRepository {
 	public Optional<SuccessfulBatch> findLatestSuccessfulBatch() {
 		List<SuccessfulBatch> rows = jdbcTemplate.query(
 				"""
-				SELECT processed_at, processing_revision
-				FROM itsm_ingest_batch
-				WHERE status = ? AND processed_at IS NOT NULL
-				ORDER BY processed_at DESC, id DESC
+				SELECT latest.processed_at, latest.received_at, (
+				    SELECT max(processing_revision) FROM itsm_ingest_batch
+				    WHERE status = 'SUCCEEDED' AND processed_at IS NOT NULL
+				) AS processing_revision
+				FROM itsm_ingest_batch AS latest
+				WHERE latest.status = 'SUCCEEDED' AND latest.processed_at IS NOT NULL
+				ORDER BY latest.processed_at DESC, latest.id DESC
 				LIMIT 1
 				""",
 				(rs, rowNum) -> {
 					Long revision = rs.getObject("processing_revision", Long.class);
 					return new SuccessfulBatch(
 							instant(rs, "processed_at"),
-							revision
+							revision,
+							instant(rs, "received_at")
 					);
-				},
-				ItsmBatchStatus.SUCCEEDED.name()
+				}
 		);
 		return rows.stream().findFirst();
 	}
@@ -160,13 +190,14 @@ public class ItsmBatchSqlRepository {
 			Instant receivedAt,
 			ItsmBatchStatus status,
 			String diagnostic,
-			Instant nextAttemptAt
+			Instant nextAttemptAt,
+			Long waitingForVersion
 	) {
 	}
 
 	public record LatestBatch(Instant receivedAt, ItsmBatchStatus status) {
 	}
 
-	public record SuccessfulBatch(Instant processedAt, Long revision) {
+	public record SuccessfulBatch(Instant processedAt, Long revision, Instant receivedAt) {
 	}
 }

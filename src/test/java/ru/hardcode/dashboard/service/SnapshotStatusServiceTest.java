@@ -14,6 +14,7 @@ import ru.hardcode.dashboard.entity.ItsmBatchStatus;
 import ru.hardcode.dashboard.repository.ItsmBatchSqlRepository;
 import ru.hardcode.dashboard.repository.ItsmBatchSqlRepository.LatestBatch;
 import ru.hardcode.dashboard.repository.ItsmBatchSqlRepository.SuccessfulBatch;
+import ru.hardcode.dashboard.repository.ItsmSnapshotPublicationRepository;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.BDDMockito.given;
@@ -27,11 +28,14 @@ class SnapshotStatusServiceTest {
 	@Mock
 	private ItsmBatchSqlRepository sqlRepository;
 
+	@Mock
+	private ItsmSnapshotPublicationRepository publicationRepository;
+
 	private SnapshotStatusService service;
 
 	@BeforeEach
 	void setUp() {
-		service = new SnapshotStatusService(sqlRepository, Duration.ofSeconds(90));
+		service = new SnapshotStatusService(sqlRepository, publicationRepository, Duration.ofSeconds(90));
 	}
 
 	@Test
@@ -66,7 +70,7 @@ class SnapshotStatusServiceTest {
 		given(sqlRepository.findLatestBatch())
 				.willReturn(Optional.of(new LatestBatch(RECEIVED_AT, ItsmBatchStatus.SUCCEEDED)));
 		given(sqlRepository.findLatestSuccessfulBatch())
-				.willReturn(Optional.of(new SuccessfulBatch(SUCCESS_AT, 41L)));
+				.willReturn(Optional.of(new SuccessfulBatch(SUCCESS_AT, 41L, RECEIVED_AT)));
 
 		SnapshotStatusResponse status = service.status();
 
@@ -80,7 +84,7 @@ class SnapshotStatusServiceTest {
 		given(sqlRepository.findLatestBatch())
 				.willReturn(Optional.of(new LatestBatch(RECEIVED_AT, ItsmBatchStatus.RECEIVED)));
 		given(sqlRepository.findLatestSuccessfulBatch())
-				.willReturn(Optional.of(new SuccessfulBatch(SUCCESS_AT, 41L)));
+				.willReturn(Optional.of(new SuccessfulBatch(SUCCESS_AT, 41L, RECEIVED_AT)));
 
 		SnapshotStatusResponse status = service.status();
 
@@ -95,7 +99,7 @@ class SnapshotStatusServiceTest {
 		given(sqlRepository.findLatestBatch())
 				.willReturn(Optional.of(new LatestBatch(old, ItsmBatchStatus.SUCCEEDED)));
 		given(sqlRepository.findLatestSuccessfulBatch())
-				.willReturn(Optional.of(new SuccessfulBatch(old, null)));
+				.willReturn(Optional.of(new SuccessfulBatch(old, null, old)));
 
 		SnapshotStatusResponse status = service.status();
 

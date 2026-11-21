@@ -31,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * for a safe retry, and an older version can never overwrite a newer published revision.
  */
 @SpringBootTest(properties = {
+		"itsm.publication.enabled=false",
 		"itsm.integration.auth.issuer=" + ItsmMachineJwtTestConfiguration.ISSUER,
 		"itsm.integration.auth.jwk-set-uri=https://keycloak.test/realms/itsm/protocol/openid-connect/certs",
 		"itsm.integration.auth.audience=" + ItsmMachineJwtTestConfiguration.AUDIENCE,
