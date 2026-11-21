@@ -1,0 +1,43 @@
+# Run explicitly with -f compose.work.yaml. The demo stack uses compose.yaml.
+name: mts-dashboard-work
+
+services:
+  work-postgres:
+    image: postgres:17-bookworm
+    environment:
+      POSTGRES_DB: dashboard_work
+      POSTGRES_USER: dashboard
+      POSTGRES_PASSWORD: ${WORK_POSTGRES_PASSWORD:?Set WORK_POSTGRES_PASSWORD in the work environment}
+    volumes:
+      - work-db-data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dashboard -d dashboard_work"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  work-backend:
+    build:
+      context: .
+    environment:
+      SERVER_PORT: "8080"
+      SPRING_PROFILES_ACTIVE: work
+      SPRING_DATASOURCE_URL: jdbc:postgresql://work-postgres:5432/dashboard_work
+      SPRING_DATASOURCE_USERNAME: dashboard
+      SPRING_DATASOURCE_PASSWORD: ${WORK_POSTGRES_PASSWORD:?Set WORK_POSTGRES_PASSWORD in the work environment}
+    depends_on:
+      work-postgres:
+        condition: service_healthy
+    ports:
+      - "${WORK_BACKEND_PORT:-8083}:8080"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail --silent --max-time 5 http://127.0.0.1:8080/health > /dev/null"]
+      interval: 15s
+      timeout: 10s
+      retries: 8
+      start_period: 60s
+
+volumes:
+  work-db-data:
