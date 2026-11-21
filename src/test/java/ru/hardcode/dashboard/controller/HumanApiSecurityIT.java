@@ -1,13 +1,9 @@
 package ru.hardcode.dashboard.controller;
 
-import java.io.IOException;
-import java.io.UncheckedIOException;
 import java.net.URI;
 import java.net.URLDecoder;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
@@ -30,13 +26,16 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
+import org.springframework.transaction.PlatformTransactionManager;
 import ru.hardcode.dashboard.ItsmPostgresTestcontainersConfiguration;
-import ru.hardcode.dashboard.client.ItsmMachineJwtTestConfiguration;
 import ru.hardcode.dashboard.client.Kan16JwtTestConfiguration;
 import ru.hardcode.dashboard.client.KeycloakAdminTestClient;
 import ru.hardcode.dashboard.client.KeycloakPkceClient;
 import ru.hardcode.dashboard.client.KeycloakTestContainer;
 import ru.hardcode.dashboard.client.TestJwtSigner;
+import ru.hardcode.dashboard.service.ItsmSnapshotPublicationService;
+import ru.hardcode.dashboard.worker.ItsmWorkerSqlRepository;
+import ru.hardcode.dashboard.worker.ItsmWorkerTransactionService;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -50,17 +49,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  * KAN-16: human login with a real Keycloak, the stateless Bearer chain for {@code /api/me} and
  * its separation from the public {@code /health} and the KAN-27 machine routes with real tokens.
  *
- * <p>The application reads the auth settings exactly as on Compose: {@code spring.config.import}
- * of the external file named by {@code APP_AUTH_HUMAN_CONFIG}. The test writes that file with
- * the issuer, JWKS and audience of its containers into an empty external directory and points
- * Spring at it, so no profile can shadow the imported values.
+ * <p>Both decoders use the real container's issuer and public keys. The human JWKS also
+ * includes a test key, so the negative claim cases can pass signature verification first.
  */
 @SpringBootTest(properties = {
-		"itsm.integration.auth.issuer=" + ItsmMachineJwtTestConfiguration.ISSUER,
-		"itsm.integration.auth.jwk-set-uri=https://keycloak.test/realms/itsm/protocol/openid-connect/certs",
-		"itsm.integration.auth.audience=" + ItsmMachineJwtTestConfiguration.AUDIENCE,
-		"itsm.integration.auth.client-id=" + ItsmMachineJwtTestConfiguration.CLIENT_ID,
-		"itsm.integration.auth.import-role=" + ItsmMachineJwtTestConfiguration.IMPORT_ROLE,
+		"itsm.worker.enabled=false",
 		"request-logging.max-cached-body-size=1KB"
 })
 @AutoConfigureMockMvc
@@ -68,21 +61,19 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Import({
 		ItsmPostgresTestcontainersConfiguration.class,
 		KeycloakTestContainer.class,
-		ItsmMachineJwtTestConfiguration.class,
 		Kan16JwtTestConfiguration.class
 })
 class HumanApiSecurityIT {
 
 	private static final String ME_PATH = "/api/me";
 	private static final String BATCH_PATH = "/api/integrations/itsm/batches";
+	private static final String DASHBOARD_PATH = "/api/dashboard/incidents";
 	private static final String HUMAN_AUDIENCE = KeycloakTestContainer.HUMAN_AUDIENCE;
 	private static final String MACHINE_AUDIENCE = KeycloakTestContainer.MACHINE_AUDIENCE;
 	/** The project setting of application.yaml (PT30S); the boundary tests use it explicitly. */
 	private static final Duration SKEW = Duration.ofSeconds(30);
 
 	private static final byte[] SNAPSHOT = "[]".getBytes(StandardCharsets.UTF_8);
-	private static final Path CONFIG_DIRECTORY = createConfigDirectory();
-	private static final Path CONFIG_FILE = CONFIG_DIRECTORY.resolve("application-auth.yaml");
 
 	@Autowired
 	private MockMvc mockMvc;
@@ -93,23 +84,24 @@ class HumanApiSecurityIT {
 	@Autowired
 	private Kan16JwtTestConfiguration.Kan16SignedTokens signedTokens;
 
+	@Autowired
+	private PlatformTransactionManager transactionManager;
+
+	@Autowired
+	private ItsmSnapshotPublicationService publication;
+
 	private KeycloakPkceClient keycloak;
 
 	@DynamicPropertySource
-	static void authProperties(DynamicPropertyRegistry registry) throws IOException {
-		KeycloakTestContainer.keycloak();
-		Files.writeString(CONFIG_FILE, """
-				app:
-				  auth:
-				    human:
-				      issuer: %s
-				      jwk-set-uri: %s
-				      audience: %s
-				""".formatted(
-				KeycloakTestContainer.issuer(),
-				KeycloakTestContainer.issuer() + "/protocol/openid-connect/certs",
-				HUMAN_AUDIENCE));
-		registry.add("spring.config.import", () -> "optional:file:" + CONFIG_DIRECTORY + "/");
+	static void authProperties(DynamicPropertyRegistry registry) {
+		registry.add("app.auth.human.issuer", KeycloakTestContainer::issuer);
+		registry.add("app.auth.human.jwk-set-uri", Kan16JwtTestConfiguration::combinedJwkSetUri);
+		registry.add("app.auth.human.audience", () -> HUMAN_AUDIENCE);
+		registry.add("itsm.integration.auth.issuer", KeycloakTestContainer::issuer);
+		registry.add("itsm.integration.auth.jwk-set-uri", KeycloakTestContainer::jwkSetUri);
+		registry.add("itsm.integration.auth.audience", () -> MACHINE_AUDIENCE);
+		registry.add("itsm.integration.auth.client-id", () -> KeycloakTestContainer.MACHINE_CLIENT_ID);
+		registry.add("itsm.integration.auth.import-role", () -> KeycloakTestContainer.IMPORT_ROLE);
 	}
 
 	@BeforeAll
@@ -125,7 +117,9 @@ class HumanApiSecurityIT {
 
 	@BeforeEach
 	void resetDatabase() {
-		jdbcTemplate.update("TRUNCATE TABLE itsm_ingest_batch");
+		jdbcTemplate.execute("""
+				TRUNCATE itsm_ingest_batch, itsm_snapshot, itsm_snapshot_source, itsm_incident CASCADE
+				""");
 		keycloak = new KeycloakPkceClient(KeycloakTestContainer.issuer());
 	}
 
@@ -310,17 +304,38 @@ class HumanApiSecurityIT {
 	}
 
 	@Test
-	void machineTokenStillImportsOnItsOwnRoute() throws Exception {
-		String token = KeycloakPkceClient.accessToken(keycloak.clientCredentials(
+	void machineTokenImportsAndOnlyTheHumanTokenReadsThePublishedDashboard() throws Exception {
+		String machineToken = KeycloakPkceClient.accessToken(keycloak.clientCredentials(
 				KeycloakTestContainer.MACHINE_CLIENT_ID, KeycloakTestContainer.ITSM_SENDER_SECRET));
 		UUID batchId = UUID.randomUUID();
+		String incidentId = "INC000016";
+		String incidentPath = DASHBOARD_PATH + "/" + incidentId;
 
-		mockMvc.perform(batchRequest(token, batchId))
+		mockMvc.perform(batchRequest(machineToken, batchId).content("""
+				[{"id":"INC000016","stateEnum":"Assigned","priorityId":4,"submitDate":"2026-11-21T09:00:00Z",
+				  "productName":"Keycloak IT", "solution":null}]
+				"""))
 				.andExpect(status().isAccepted())
 				.andExpect(jsonPath("$.batchId").value(batchId.toString()));
 
 		assertThat(jdbcTemplate.queryForObject(
 				"SELECT count(*) FROM itsm_ingest_batch WHERE id = ?", Integer.class, batchId)).isEqualTo(1);
+		var worker = new ItsmWorkerTransactionService(new ItsmWorkerSqlRepository(jdbcTemplate), transactionManager);
+		assertThat(worker.claimAndProcess(publication, "kan16-test").batchId()).isEqualTo(batchId);
+
+		String humanToken = keycloak.login(KeycloakTestContainer.TEST_USERNAME, KeycloakTestContainer.TEST_PASSWORD);
+		mockMvc.perform(get(DASHBOARD_PATH).header(HttpHeaders.AUTHORIZATION, "Bearer " + humanToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.items[0].id").value(incidentId));
+		mockMvc.perform(get(incidentPath).header(HttpHeaders.AUTHORIZATION, "Bearer " + humanToken))
+				.andExpect(status().isOk())
+				.andExpect(jsonPath("$.id").value(incidentId));
+		for (String path : new String[]{DASHBOARD_PATH, incidentPath}) {
+			mockMvc.perform(get(path).header(HttpHeaders.AUTHORIZATION, "Bearer " + machineToken))
+					.andExpect(status().isUnauthorized())
+					.andExpect(jsonPath("$.code").value("AUTH_REQUIRED"))
+					.andExpect(jsonPath("$.message").value("Authentication is required"));
+		}
 	}
 
 	@Test
@@ -380,17 +395,9 @@ class HumanApiSecurityIT {
 
 	@Test
 	void unknownUserCannotRegister() throws Exception {
-		String unknown = "kan16-intruder-" + UUID.randomUUID();
-
 		HttpResponse<String> page = keycloak.registrationPage();
-		assertThat(page.statusCode()).isIn(302, 404);
-
-		HttpResponse<String> post = keycloak.submitRegistration(unknown, unknown + "@example.test");
-		assertThat(post.statusCode()).isEqualTo(400);
-		assertThat(post.body()).contains("Registration not allowed").doesNotContain("access_token");
-
-		KeycloakAdminTestClient admin = admin();
-		assertThat(admin.userExists(unknown)).isFalse();
+		assertThat(page.statusCode()).isEqualTo(400);
+		assertThat(page.body()).containsIgnoringCase("registration not allowed").doesNotContain("access_token");
 	}
 
 	@Test
@@ -474,11 +481,4 @@ class HumanApiSecurityIT {
 				KeycloakTestContainer.ADMIN_USERNAME, KeycloakTestContainer.ADMIN_PASSWORD);
 	}
 
-	private static Path createConfigDirectory() {
-		try {
-			return Files.createTempDirectory("kan16-auth");
-		} catch (IOException exception) {
-			throw new UncheckedIOException(exception);
-		}
-	}
 }

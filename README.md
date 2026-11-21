@@ -167,3 +167,12 @@ unset token
 `subject` в ответе — значение `sub` из проверенного JWT. Для импорта используется
 отдельный клиент `itsm-sender` и аудитория `itsm-ingest`. Проверка в Docker
 выполняется командой `sh ./gradlew :test --tests '*HumanApiSecurityIT'`.
+
+Чтобы подключить внешний Keycloak к `compose.work.yaml`, задайте в рабочем env-файле
+`APP_AUTH_HUMAN_ISSUER` (точное значение `iss`, доступное браузеру),
+`APP_AUTH_HUMAN_JWK_SET_URI` (URL ключей, доступный из контейнера) и
+`APP_AUTH_HUMAN_AUDIENCE=dashboard-api`. Вместо URL ключей для человека можно задать
+`APP_AUTH_HUMAN_ISSUER_URI` для discovery. Для приёма снимков отдельно задайте
+`ITSM_INTEGRATION_AUTH_ISSUER`, `ITSM_INTEGRATION_AUTH_JWK_SET_URI`,
+`ITSM_INTEGRATION_AUTH_AUDIENCE=itsm-ingest` и `ITSM_INTEGRATION_AUTH_CLIENT_ID=itsm-sender`.
+Секрет отправителя нужен самому отправителю, бэкенд проверяет токен по публичным ключам.

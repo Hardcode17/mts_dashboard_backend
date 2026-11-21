@@ -38,17 +38,10 @@ public final class KeycloakAdminTestClient {
 
 	public void resetPassword(String username, String password) {
 		JsonNode user = findUser(username);
-		send(HttpRequest.newBuilder(URI.create(userUri(user)))
+		send(HttpRequest.newBuilder(URI.create(userUri(user) + "/reset-password"))
 				.header("Content-Type", "application/json")
 				.PUT(HttpRequest.BodyPublishers.ofString(
 						json(fields("type", "password", "value", password, "temporary", false)))), 204);
-	}
-
-	public void resetClientSecret(String clientId, String secret) {
-		JsonNode client = findClient(clientId);
-		send(HttpRequest.newBuilder(URI.create(clientUri(client)))
-				.header("Content-Type", "application/json")
-				.PUT(HttpRequest.BodyPublishers.ofString(json(fields("clientId", clientId, "secret", secret)))), 204);
 	}
 
 	public boolean userExists(String username) {
@@ -57,7 +50,7 @@ public final class KeycloakAdminTestClient {
 
 	public List<String> userGroups(String username) {
 		JsonNode groups = send(HttpRequest.newBuilder(URI.create(userUri(findUser(username)) + "/groups")).GET(), 200);
-		return groups.properties().stream().map(entry -> entry.getValue().get("path").asString()).toList();
+		return groups.valueStream().map(group -> group.get("path").asString()).toList();
 	}
 
 	/** Creates an enabled user without e-mail verification, as an administrator would. */
@@ -83,14 +76,6 @@ public final class KeycloakAdminTestClient {
 		return users.getFirst();
 	}
 
-	private JsonNode findClient(String clientId) {
-		JsonNode clients = send(HttpRequest.newBuilder(URI.create(realmUri("/clients?clientId=" + encode(clientId)))).GET(), 200);
-		if (clients.size() != 1) {
-			throw new IllegalStateException("Expected exactly one client " + clientId + " but found " + clients.size());
-		}
-		return clients.get(0);
-	}
-
 	private List<JsonNode> users(String pathAndQuery) {
 		JsonNode users = send(HttpRequest.newBuilder(URI.create(realmUri(pathAndQuery))).GET(), 200);
 		return users.valueStream().toList();
@@ -98,10 +83,6 @@ public final class KeycloakAdminTestClient {
 
 	private String userUri(JsonNode user) {
 		return realmUri("/users/" + user.get("id").asString());
-	}
-
-	private String clientUri(JsonNode client) {
-		return realmUri("/clients/" + client.get("id").asString());
 	}
 
 	private String realmUri(String path) {
