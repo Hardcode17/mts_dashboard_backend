@@ -48,6 +48,16 @@ SQL
     )"
     if [[ "$fresh_count" =~ ^[0-9]+$ ]] && ((fresh_count >= 2)); then
       printf 'ITSM mock is running; backend applied %s fresh snapshots.\n' "$fresh_count"
+      scored="$("${db[@]}" -v source="$source" -v since="$started_at" <<'SQL'
+SELECT count(*)
+FROM deadline_risk AS risk
+JOIN itsm_incident AS incident ON incident.id = risk.incident_id
+WHERE incident.source_id = :'source'
+  AND risk.evaluated_at >= :'since'::timestamptz
+  AND risk.score IS NOT NULL;
+SQL
+      )"
+      printf 'Backend calculated numeric regression scores for %s stand incidents.\n' "$scored"
       exit 0
     fi
   fi
