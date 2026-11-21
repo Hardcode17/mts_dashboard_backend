@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.List;
+import java.util.Objects;
 
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -28,6 +29,7 @@ import ru.hardcode.dashboard.service.ItsmIncidentSnapshotParser;
 import tools.jackson.databind.JsonNode;
 import tools.jackson.databind.ObjectMapper;
 import tools.jackson.databind.node.ArrayNode;
+import tools.jackson.databind.node.ObjectNode;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.hamcrest.Matchers.containsString;
@@ -58,7 +60,6 @@ class ItsmIncidentSnapshotParserIT {
 
 	private static final String ADAPTER_PATH = "/api/integrations/itsm/test-decode";
 	private static final String SAMPLE = "itsm/character_problems.json";
-	private static final String MISSING = "must be a single JSON array";
 
 	@Autowired
 	private MockMvc mockMvc;
@@ -92,11 +93,14 @@ class ItsmIncidentSnapshotParserIT {
 		assertThat(records.values()).filteredOn(record -> record.get("deadline").isNull()).hasSize(3);
 		assertThat(records.values()).filteredOn(record -> "Research".equals(record.get("state").asString()))
 				.hasSize(5).allSatisfy(record -> assertThat(record.get("completionDate").asString()).endsWith("Z"));
-		assertThat(records.values()).allSatisfy(record -> {
-			assertThat(record.get("submitDate").asString()).endsWith("Z");
-			assertThat(record.get("priorityId").isIntegralNumber()).isTrue();
-			assertThat(record.get("technicalReferenceDate").isNull()).isTrue();
-		});
+		for (int index = 0; index < original.size(); index++) {
+			JsonNode normalized = records.get(index);
+			JsonNode source = original.get(index);
+			assertThat(normalized.get("submitDate").asString()).endsWith("Z");
+			assertThat(normalized.get("priorityId")).isEqualTo(source.get("priorityId"));
+			assertThat(normalized.get("state")).isEqualTo(source.get("stateEnum"));
+			assertThat(normalized.get("technicalReferenceDate").isNull()).isTrue();
+		}
 	}
 
 	@Test
@@ -119,7 +123,7 @@ class ItsmIncidentSnapshotParserIT {
 		mockMvc.perform(decode(Arrays.copyOf(payload, payload.length / 2)))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("ITSM_INVALID_PAYLOAD"))
-				.andExpect(jsonPath("$.message").value(containsString(MISSING)))
+				.andExpect(jsonPath("$.message").value(containsString("must be a single JSON array")))
 				.andExpect(jsonPath("$.records").doesNotExist());
 	}
 
@@ -130,7 +134,7 @@ class ItsmIncidentSnapshotParserIT {
 		mockMvc.perform(decode(objectMapper.writeValueAsBytes(payload)))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("ITSM_DUPLICATE_RECORD"))
-				.andExpect(jsonPath("$.message").value(containsString("index 44")))
+				.andExpect(jsonPath("$.message").value(containsString("duplicate id")))
 				.andExpect(jsonPath("$.message").value(not(containsString("INC000021931151"))))
 				.andExpect(jsonPath("$.records").doesNotExist());
 	}
@@ -139,7 +143,7 @@ class ItsmIncidentSnapshotParserIT {
 	@ValueSource(strings = {"stateEnum", "priorityId"})
 	void invalidFieldReturnsSafeDiagnosticForEntireSnapshot(String field) throws Exception {
 		ArrayNode payload = (ArrayNode) objectMapper.readTree(fixture());
-		((tools.jackson.databind.node.ObjectNode) payload.get(43)).put(field, "not-a-valid-value");
+		((ObjectNode) payload.get(43)).put(field, "not-a-valid-value");
 		mockMvc.perform(decode(objectMapper.writeValueAsBytes(payload)))
 				.andExpect(status().isBadRequest())
 				.andExpect(jsonPath("$.code").value("ITSM_INVALID_RECORD"))
@@ -200,9 +204,9 @@ class ItsmIncidentSnapshotParserIT {
 		private static ItRecord from(ItsmIncidentRecord record) {
 			return new ItRecord(
 					record.id(), record.state().name(), record.priorityId(), record.submitDate().toString(),
-					java.util.Objects.toString(record.deadline(), null),
-					java.util.Objects.toString(record.completionDate(), null),
-					java.util.Objects.toString(record.technicalReferenceDate(), null),
+					Objects.toString(record.deadline(), null),
+					Objects.toString(record.completionDate(), null),
+					Objects.toString(record.technicalReferenceDate(), null),
 					record.solution()
 			);
 		}

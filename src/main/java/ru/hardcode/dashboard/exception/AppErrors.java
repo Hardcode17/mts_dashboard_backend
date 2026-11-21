@@ -14,7 +14,7 @@ public enum AppErrors implements AppError {
 	ITSM_INVALID_RECORD("ITSM_INVALID_RECORD", HttpStatus.BAD_REQUEST,
 			"ITSM record in snapshot at index ${index} has invalid field ${field}: ${reason}"),
 	ITSM_DUPLICATE_RECORD("ITSM_DUPLICATE_RECORD", HttpStatus.BAD_REQUEST,
-			"ITSM snapshot contains duplicate records; record at index ${index} repeats index ${firstIndex}"),
+			"ITSM snapshot contains duplicate id; record at index ${index} repeats index ${firstIndex}"),
 	ITSM_IDEMPOTENCY_CONFLICT("ITSM_IDEMPOTENCY_CONFLICT", HttpStatus.CONFLICT, "Idempotency-Key was already used with different request metadata or payload"),
 	ITSM_SOURCE_VERSION_CONFLICT("ITSM_SOURCE_VERSION_CONFLICT", HttpStatus.CONFLICT, "Source version was already accepted with a different idempotency key"),
 	ITSM_INTAKE_QUEUE_FULL("ITSM_INTAKE_QUEUE_FULL", HttpStatus.TOO_MANY_REQUESTS, "ITSM intake queue is full (${max} outstanding batches)"),

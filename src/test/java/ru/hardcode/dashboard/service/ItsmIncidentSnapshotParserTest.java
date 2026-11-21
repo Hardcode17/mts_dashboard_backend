@@ -157,7 +157,7 @@ class ItsmIncidentSnapshotParserTest {
 				.isInstanceOfSatisfying(AppException.class, exception -> {
 					assertThat(exception.getAppError()).isEqualTo(AppErrors.ITSM_DUPLICATE_RECORD);
 					assertThat(exception.getMessage())
-							.isEqualTo("ITSM snapshot contains duplicate records; record at index 1 repeats index 0");
+							.isEqualTo("ITSM snapshot contains duplicate id; record at index 1 repeats index 0");
 				});
 	}
 
