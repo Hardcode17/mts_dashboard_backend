@@ -28,7 +28,30 @@ if [[ "${STAND_ENABLE_ITSM_MOCK:-false}" == true ]]; then
   fixture=".stand-sources/data/Предоставленные материалы/character_problems.json"
   fixture_dir="$PWD/.stand-sources/fixtures"
   mkdir -p "$fixture_dir"
-  install -m 644 "$fixture" "$fixture_dir/character_problems.json"
+  mentor_dir=".stand-sources/data/docs/mentor-demo/pi"
+  if [[ -d "$mentor_dir" ]]; then
+    python3 - "$fixture" "$mentor_dir/incidents.json" "$fixture_dir/character_problems.json" <<'PYTHON'
+import json
+import sys
+from pathlib import Path
+
+base_path, mentor_path, destination = map(Path, sys.argv[1:])
+original = json.loads(base_path.read_text())
+extra = json.loads(mentor_path.read_text())
+if not extra or any(row["priorityId"] != 2 for row in extra):
+    raise SystemExit("The mentor deployment accepts only priority-2 examples")
+rows = original + extra
+for field in ("id", "sysId"):
+    if len({row[field] for row in rows}) != len(rows):
+        raise SystemExit(f"Duplicate ITSM {field} in the combined fixture")
+destination.write_text(json.dumps(rows, ensure_ascii=False, separators=(",", ":")))
+PYTHON
+    install -m 644 "$mentor_dir/investigation.json" "$frontend_dir/mock/fixtures/stand-investigation.json"
+  else
+    install -m 644 "$fixture" "$fixture_dir/character_problems.json"
+  fi
+  digest=$(sha256sum "$fixture_dir/character_problems.json" | cut -d ' ' -f 1)
+  printf 'STAND_FIXTURE_SHA256=%s\n' "$digest" >> "$GITHUB_ENV"
   printf 'STAND_FIXTURE_DIR=%s\nITSM_MOCK_FIXTURE_FILE=/fixtures/character_problems.json\nSTAND_ITSM_PAGE_URL=http://itsm-mock:8080\n' \
     "$fixture_dir" >> "$GITHUB_ENV"
 fi

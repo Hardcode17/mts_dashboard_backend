@@ -102,6 +102,10 @@ jobs:
       - name: Deploy frontend and verify the unified stand
         run: bash scripts/deploy-stand-frontend.sh
 
+      - name: Verify mentor examples in the coordinator workspace
+        if: env.STAND_ENABLE_ITSM_MOCK == 'true'
+        run: python3 scripts/verify-mentor-demo.py
+
       - name: Show deployment status
         run: docker compose --env-file "$BACKEND_ENV_FILE" ps
 
