@@ -109,6 +109,8 @@ services:
 
   itsm-mock:
     profiles: [itsm-mock]
+    labels:
+      ru.hardcode.itsm-fixture-sha256: ${STAND_FIXTURE_SHA256:-none}
     build:
       context: .
       dockerfile: itsm-mock/Dockerfile
