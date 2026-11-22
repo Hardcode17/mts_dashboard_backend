@@ -91,6 +91,15 @@ jobs:
             -f - < scripts/grant-coordinator.sql
           echo "Admitted coordinator (sub=$subject) for $issuer"
 
+      - name: Seed demo shift handover coordinators
+        if: env.STAND_ENABLE_ITSM_MOCK == 'true'
+        run: |
+          issuer="${STAND_KEYCLOAK_URL%/}/realms/dashboard"
+          roster=$(python3 scripts/stand-coordinator-subject.py "$BACKEND_ENV_FILE" --seed-handover)
+          docker compose --env-file "$BACKEND_ENV_FILE" exec -T postgres \
+            psql -U dashboard -d dashboard -v issuer="$issuer" -v roster="$roster" \
+            -f - < scripts/seed-demo-shift-coordinators.sql
+
       - name: Start stand ITSM mock and verify two fresh snapshots
         if: env.STAND_ENABLE_ITSM_MOCK == 'true'
         run: bash scripts/deploy-stand-itsm.sh
