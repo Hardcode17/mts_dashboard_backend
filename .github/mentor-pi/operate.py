@@ -1,6 +1,8 @@
 """Operate only the mentor cases of the deployed ITSM. No application or database migration."""
 import argparse
+import fcntl
 import json
+import os
 import subprocess as sp
 import signal
 import time
@@ -23,6 +25,8 @@ def service_id(service):
 
 
 def operate(action):
+    from coordinator_api import workspace
+    api = workspace()
     mock = service_id('itsm-mock')
     binding = docker('port', mock, '8080/tcp')
     if not binding.startswith('127.0.0.1:') or not binding[10:].isdigit():
@@ -82,8 +86,6 @@ def operate(action):
         else:
             raise RuntimeError('Timed out waiting for Spring to apply the snapshot')
 
-    from coordinator_api import workspace
-    api = workspace()
     for _ in range(50):
         desk = api('/api/workspace/snapshot?mode=case')['desk']
         records = desk['records']
@@ -111,4 +113,22 @@ if __name__ == '__main__':
     signal.signal(signal.SIGTERM, interrupted)
     p=argparse.ArgumentParser()
     p.add_argument('action', choices=['check','reset','send'])
-    operate(p.parse_args().action)
+    action = p.parse_args().action
+    # Manual and Actions invocations use exactly the same stand and operator lock.
+    os.chdir(Path(__file__).resolve().parents[2])
+    runtime = Path(os.environ.setdefault('BACKEND_ENV_FILE', '/home/gha-runner/.config/mts-dashboard-backend/runtime.env'))
+    try:
+        with runtime.open() as config:
+            issuer = next((line.partition('=')[2].strip() for line in config
+                           if line.startswith('APP_AUTH_HUMAN_ISSUER=')), '')
+            if not issuer.endswith('/realms/dashboard'):
+                raise SystemExit(f'Отсутствует issuer стенда в {runtime}')
+            keycloak = os.environ.setdefault('STAND_KEYCLOAK_URL', issuer.removesuffix('/realms/dashboard'))
+            os.environ.setdefault('STAND_FRONTEND_URL', keycloak.rsplit('/', 1)[0])
+            try:
+                fcntl.flock(config, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError:
+                raise SystemExit('Другая команда демо уже выполняется.')
+            operate(action)
+    except PermissionError:
+        raise SystemExit(f'Для запуска нужен доступ к {runtime} и Docker стенда.')
