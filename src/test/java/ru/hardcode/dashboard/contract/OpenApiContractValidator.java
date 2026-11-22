@@ -582,6 +582,8 @@ final class OpenApiContractValidator {
 		canonical.put("listNotifications", "GET " + notifications);
 		canonical.put("markNotificationRead", "POST " + notifications + "/{id}/read");
 		canonical.put("retryNotificationDelivery", "POST " + notifications + "/deliveries/{id}/retry");
+		canonical.put("redirectCoordinationTask", "POST /api/dashboard/coordination-tasks/{taskId}/redirect");
+		canonical.put("listCoordinationTaskAssignments", "GET /api/dashboard/coordination-tasks/{taskId}/assignments");
 		canonical.forEach((operationId, route) -> {
 			List<String> found = routes.getOrDefault(operationId, List.of());
 			if (!found.equals(List.of(route))) {

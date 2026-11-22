@@ -14,6 +14,7 @@ import ru.hardcode.dashboard.dto.CoordinationWindowResponse;
 import ru.hardcode.dashboard.exception.AppErrors;
 import ru.hardcode.dashboard.exception.AppException;
 import ru.hardcode.dashboard.repository.CoordinationClaimRepository;
+import ru.hardcode.dashboard.repository.CoordinationTaskAssignmentRepository;
 import ru.hardcode.dashboard.repository.CoordinationClaimRepository.Assignment;
 import ru.hardcode.dashboard.repository.CoordinationClaimRepository.OpenTask;
 
@@ -25,10 +26,13 @@ public class CoordinationClaimService {
 
 	private final CoordinationClaimRepository repository;
 	private final Clock clock;
+	private final CoordinationTaskAssignmentRepository assignments;
 
-	public CoordinationClaimService(CoordinationClaimRepository repository, Clock clock) {
+	public CoordinationClaimService(CoordinationClaimRepository repository, Clock clock,
+			CoordinationTaskAssignmentRepository assignments) {
 		this.repository = repository;
 		this.clock = clock;
+		this.assignments = assignments;
 	}
 
 	@Transactional(readOnly = true)
@@ -77,6 +81,9 @@ public class CoordinationClaimService {
 	private OpenTask lockForActor(long taskId, long actor) {
 		OpenTask task = repository.lock(taskId)
 				.orElseThrow(() -> new AppException(AppErrors.COORDINATION_TASK_NOT_OPEN));
+		if (assignments.active(taskId).filter(assignment -> !assignments.isMember(assignment.coordinatorGroupId(), actor)).isPresent()) {
+			throw new AppException(AppErrors.COORDINATION_REDIRECT_FORBIDDEN);
+		}
 		if (task.coordinatorId() != null && task.coordinatorId() != actor) {
 			throw new AppException(AppErrors.COORDINATION_TASK_TAKEN);
 		}

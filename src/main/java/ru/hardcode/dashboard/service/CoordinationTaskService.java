@@ -27,8 +27,8 @@ public class CoordinationTaskService {
 	}
 
 	@Transactional(readOnly = true)
-	public List<CoordinationTaskResponse> queue() {
-		return repository.listOpen().stream()
+	public List<CoordinationTaskResponse> queue(long actor) {
+		return repository.listOpen(actor).stream()
 				.map(task -> new CoordinationTaskResponse(task.taskId(), task.incidentId(), task.createdAt()))
 				.toList();
 	}

@@ -45,11 +45,16 @@ public class CoordinationTaskRepository {
 				        (incoming.login IS NOT NULL AND incoming.login IS DISTINCT FROM old.login) OR
 				        (incoming.login IS NULL AND incoming.employee IS NOT NULL
 				         AND incoming.employee IS DISTINCT FROM old.employee))
+				), closed AS (
+				    UPDATE coordination_tasks task
+				    SET status='completed', finished_at=?, updated_at=?, handoff_source_id=?,
+				        handoff_source_version=?, handoff_observed_at=?, handoff_type=transfers.kind
+				    FROM transfers WHERE task.incident_id=transfers.id AND task.status='open'
+				    RETURNING task.id, task.finished_at
 				)
-				UPDATE coordination_tasks task
-				SET status='completed', finished_at=?, updated_at=?, handoff_source_id=?,
-				    handoff_source_version=?, handoff_observed_at=?, handoff_type=transfers.kind
-				FROM transfers WHERE task.incident_id=transfers.id AND task.status='open'
+				UPDATE coordination_task_assignments a
+				SET status='completed', ended_at=greatest(a.assigned_at, closed.finished_at)
+				FROM closed WHERE a.coordination_task_id=closed.id AND a.ended_at IS NULL
 				""", snapshot, sourceId, group, time, time, sourceId, version, time);
 		if (entryRevision != null && !group.isBlank()) {
 			jdbc.update("""
@@ -78,12 +83,18 @@ public class CoordinationTaskRepository {
 				""", sourceId, snapshot);
 	}
 
-	public List<Task> listOpen() {
+	public List<Task> listOpen(long actor) {
 		return jdbc.query("""
-				SELECT id, incident_id, created_at FROM coordination_tasks
-				WHERE status = 'open' AND coordinator_id IS NULL ORDER BY created_at, id
+				SELECT t.id, t.incident_id, t.created_at FROM coordination_tasks t
+				LEFT JOIN coordination_task_assignments a ON a.coordination_task_id = t.id AND a.ended_at IS NULL
+				WHERE t.status = 'open' AND t.coordinator_id IS NULL
+				  AND (a.id IS NULL OR EXISTS (SELECT 1 FROM coordinator_group_members m
+				       JOIN coordinator_groups g ON g.id = m.coordinator_group_id
+				       WHERE m.coordinator_group_id = a.coordinator_group_id
+				         AND m.user_id = ? AND m.is_active AND g.is_active))
+				ORDER BY t.created_at, t.id
 				""", (rs, n) -> new Task(rs.getLong("id"), rs.getString("incident_id"),
-				rs.getTimestamp("created_at").toInstant()));
+				rs.getTimestamp("created_at").toInstant()), actor);
 	}
 
 	public record Task(long taskId, String incidentId, Instant createdAt) {
