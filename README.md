@@ -224,6 +224,7 @@ curl -fsS -H "Authorization: Bearer $machine_token" \
 | Живая связь с ITSM | `DASHBOARD_ITSM_BASE_URL` для серверных вызовов и `DASHBOARD_ITSM_LINK_TEMPLATE` для ссылки из браузера. |
 | Простая проверка запуска | Профиль `demo` по умолчанию в [compose.yaml](compose.yaml). |
 | Отдельная рабочая база | Профиль `work` из [compose.work.yaml](compose.work.yaml) с отдельным env-файлом, `WORK_POSTGRES_PASSWORD` и томом. |
+| Реальные вызовы модели расследований | Профиль `ai` вместе с базовым: `SPRING_PROFILES_ACTIVE=demo,evidence,ai` и `DASHBOARD_AI_DEEPSEEK_API_KEY` (KAN-40). Без ключа запуск расследования возвращает явный `503 AI_MODEL_NOT_CONFIGURED`, карточка INC работает как обычно. |
 
 Мок по умолчанию отправляет синтетический снимок раз в 30 секунд. Включить его можно флагом `--profile itsm-mock` в команде запуска Compose. Основной бэкенд должен принимать токены настроенного машинного клиента. Параметры авторизации, лимиты и повторы описаны в [документации по импорту ITSM](docs/itsm-ingest.md).
 
