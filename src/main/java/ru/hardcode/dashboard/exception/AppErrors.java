@@ -39,6 +39,10 @@ public enum AppErrors implements AppError {
 	ITSM_MACHINE_ACCESS_DENIED("ITSM_MACHINE_ACCESS_DENIED", HttpStatus.FORBIDDEN, "Machine client identity or itsm import permission is missing"),
 	HUMAN_AUTH_REQUIRED("HUMAN_AUTH_REQUIRED", HttpStatus.UNAUTHORIZED, "Human access token is required"),
 	AUTH_REQUIRED("AUTH_REQUIRED", HttpStatus.UNAUTHORIZED, "Authentication is required"),
+	INVALID_INCIDENT_PRESET("INVALID_INCIDENT_PRESET", HttpStatus.BAD_REQUEST, "Invalid incident preset"),
+	INCIDENT_PRESET_NOT_FOUND("INCIDENT_PRESET_NOT_FOUND", HttpStatus.NOT_FOUND, "Incident preset was not found"),
+	INCIDENT_PRESET_NAME_EXISTS("INCIDENT_PRESET_NAME_EXISTS", HttpStatus.CONFLICT,
+			"An incident preset with this name already exists"),
 	INVALID_GROUP("INVALID_GROUP", HttpStatus.BAD_REQUEST, "Unknown dashboard group ${group}"),
 	INVALID_CURSOR("INVALID_CURSOR", HttpStatus.BAD_REQUEST, "cursor is not a valid list cursor"),
 	// Shared by the KAN-28 incident change feed (afterEventSeq) and the KAN-25 shift queue

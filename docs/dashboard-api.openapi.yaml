@@ -1601,6 +1601,261 @@ paths:
                 cookieAuthRequired:
                   summary: Нет сессии интерфейса
                   value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
+  /api/dashboard/incident-presets:
+    get:
+      operationId: listIncidentPresets
+      summary: Список моих пресетов (KAN-45)
+      security: [{coordinatorBearer: []}]
+      responses:
+        '200':
+          description: Личные пресеты.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/IncidentPreset'}
+              examples:
+                saved:
+                  summary: Личный фильтр координатора
+                  value: [{id: 12, name: Просроченные платежи, queue: all, filters: {product: Платёжный шлюз, deadline: late, priority: "3"}}]
+        '401':
+          description: Нет токена координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                missingToken:
+                  summary: Нет токена координатора
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                accessDenied:
+                  summary: Нет допуска координатора
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+    post:
+      operationId: createIncidentPreset
+      summary: Создать личный пресет (KAN-45)
+      security: [{coordinatorBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IncidentPresetSettings'}
+            examples:
+              search:
+                summary: Фильтры для списка
+                value: {name: Просроченные платежи, queue: all, filters: {product: Платёжный шлюз, deadline: late, priority: "3"}}
+      responses:
+        '201':
+          description: Сохранённый пресет.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentPreset'}
+              examples:
+                saved:
+                  summary: Личный фильтр координатора
+                  value: {id: 12, name: Просроченные платежи, queue: all, filters: {product: Платёжный шлюз, deadline: late, priority: "3"}}
+        '400':
+          description: Некорректный пресет.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                invalidPreset:
+                  summary: Некорректный пресет
+                  value: {code: INVALID_INCIDENT_PRESET, message: Invalid incident preset}
+        '401':
+          description: Нет токена координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                missingToken:
+                  summary: Нет токена координатора
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                accessDenied:
+                  summary: Нет допуска координатора
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+        '409':
+          description: У координатора уже есть пресет с таким именем.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                duplicateName:
+                  summary: У координатора уже есть пресет с таким именем
+                  value: {code: INCIDENT_PRESET_NAME_EXISTS, message: An incident preset with this name already exists}
+
+  /api/dashboard/incident-presets/{id}:
+    get:
+      operationId: getIncidentPreset
+      summary: Прочитать свой пресет (KAN-45)
+      security: [{coordinatorBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, format: int64}
+      responses:
+        '200':
+          description: Сохранённый пресет.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentPreset'}
+              examples:
+                saved:
+                  summary: Личный фильтр координатора
+                  value: {id: 12, name: Просроченные платежи, queue: all, filters: {product: Платёжный шлюз, deadline: late, priority: "3"}}
+        '401':
+          description: Нет токена координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                missingToken:
+                  summary: Нет токена координатора
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                accessDenied:
+                  summary: Нет допуска координатора
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+        '404':
+          description: Пресет отсутствует у текущего координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                unknownPreset:
+                  summary: Пресет отсутствует у текущего координатора
+                  value: {code: INCIDENT_PRESET_NOT_FOUND, message: Incident preset was not found}
+    put:
+      operationId: updateIncidentPreset
+      summary: Изменить свой пресет (KAN-45)
+      security: [{coordinatorBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, format: int64}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IncidentPresetSettings'}
+            examples:
+              search:
+                summary: Фильтры для списка
+                value: {name: Просроченные платежи, queue: all, filters: {product: Платёжный шлюз, deadline: late, priority: "3"}}
+      responses:
+        '200':
+          description: Сохранённый пресет.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentPreset'}
+              examples:
+                saved:
+                  summary: Личный фильтр координатора
+                  value: {id: 12, name: Просроченные платежи, queue: all, filters: {product: Платёжный шлюз, deadline: late, priority: "3"}}
+        '400':
+          description: Некорректный пресет.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                invalidPreset:
+                  summary: Некорректный пресет
+                  value: {code: INVALID_INCIDENT_PRESET, message: Invalid incident preset}
+        '401':
+          description: Нет токена координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                missingToken:
+                  summary: Нет токена координатора
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                accessDenied:
+                  summary: Нет допуска координатора
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+        '404':
+          description: Пресет отсутствует у текущего координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                unknownPreset:
+                  summary: Пресет отсутствует у текущего координатора
+                  value: {code: INCIDENT_PRESET_NOT_FOUND, message: Incident preset was not found}
+        '409':
+          description: У координатора уже есть пресет с таким именем.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                duplicateName:
+                  summary: У координатора уже есть пресет с таким именем
+                  value: {code: INCIDENT_PRESET_NAME_EXISTS, message: An incident preset with this name already exists}
+    delete:
+      operationId: deleteIncidentPreset
+      summary: Удалить свой пресет (KAN-45)
+      security: [{coordinatorBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, format: int64}
+      responses:
+        '204':
+          description: Пресет удалён.
+        '401':
+          description: Нет токена координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                missingToken:
+                  summary: Нет токена координатора
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                accessDenied:
+                  summary: Нет допуска координатора
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+        '404':
+          description: Пресет отсутствует у текущего координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                unknownPreset:
+                  summary: Пресет отсутствует у текущего координатора
+                  value: {code: INCIDENT_PRESET_NOT_FOUND, message: Incident preset was not found}
+
 components:
   securitySchemes:
     coordinatorBearer:
@@ -1622,6 +1877,47 @@ components:
         Проверяются `iss`, подпись JWKS, `exp`, `aud`; остальное — как `machineBearer` в
         `itsm-ingest.openapi.yaml`.
   schemas:
+    IncidentPresetSettings:
+      type: object
+      additionalProperties: false
+      required: [name, queue, filters]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        queue:
+          type: string
+          enum: [all, critical, coordinator, high, research]
+        filters:
+          $ref: '#/components/schemas/IncidentPresetFilters'
+
+    IncidentPreset:
+      type: object
+      required: [id, name, queue, filters]
+      properties:
+        id: {type: integer, format: int64}
+        name: {type: string}
+        queue: {type: string, enum: [all, critical, coordinator, high, research]}
+        filters:
+          $ref: '#/components/schemas/IncidentPresetFilters'
+
+    IncidentPresetFilters:
+      type: object
+      additionalProperties: false
+      description: Параметры KAN-26 и сохранённый размер страницы. sla=soon разрешён для critical.
+      properties:
+        q: {type: string, minLength: 1, maxLength: 300}
+        priority: {type: string, enum: ['1', '2', '3', '4']}
+        product: {type: string, minLength: 1, maxLength: 300}
+        team: {type: string, minLength: 1, maxLength: 300}
+        state: {type: string, enum: [Assigned, WorkInProgress, Resolved, Closed, Research]}
+        serviceType: {type: string, minLength: 1, maxLength: 300}
+        deadline: {type: string, enum: [none, late, near]}
+        sort: {type: string, enum: [updated, registered, deadline]}
+        size: {type: string, enum: ['5', '25', '50', '100']}
+        sla: {type: string, enum: [soon]}
+
     IncidentId:
       type: string
       pattern: '^INC[0-9]{6,18}$'
