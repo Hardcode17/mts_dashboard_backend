@@ -1,0 +1,41 @@
+name: Pi mentor demo
+run-name: Pi mentor demo · ${{ inputs.operation }}
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Operation on the stand
+        required: true
+        type: choice
+        default: check
+        options: [check, reset, send]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pi-mentor-operator
+  cancel-in-progress: false
+
+jobs:
+  operate:
+    if: github.repository == 'Hardcode17/mts_dashboard_backend' && github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, Linux, ARM64, pi-web]
+    timeout-minutes: 5
+    env:
+      OPERATION: ${{ inputs.operation }}
+      ENABLED: ${{ vars.STAND_ENABLE_ITSM_MOCK }}
+      BACKEND_ENV_FILE: ${{ vars.BACKEND_ENV_FILE || '/home/gha-runner/.config/mts-dashboard-backend/runtime.env' }}
+      FRONTEND_PORT: ${{ vars.FRONTEND_PORT || '8080' }}
+      STAND_KEYCLOAK_URL: ${{ vars.STAND_KEYCLOAK_URL }}
+      STAND_FRONTEND_URL: ${{ vars.STAND_FRONTEND_URL }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          path: mentor-control
+          persist-credentials: false
+      - name: Run operator script on Raspberry Pi
+        working-directory: mentor-control
+        run: |
+          test "$ENABLED" = true
+          python3 .github/mentor-pi/operate.py "$OPERATION"
