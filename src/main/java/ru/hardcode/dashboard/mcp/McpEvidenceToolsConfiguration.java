@@ -53,15 +53,8 @@ public class McpEvidenceToolsConfiguration {
 	 */
 	@Bean
 	McpServerFeatures.SyncToolSpecification getIncidentContextTool() {
-		McpSchema.Tool tool = McpSchema.Tool.builder()
-				.name(INCIDENT_CONTEXT_TOOL)
-				.title("Incident context evidence")
-				.description("""
-						Read-only context evidence for the mapped demo incident: the assigned command, \
-						the latest log record and the diagnostic metric of its bound services for one \
-						bounded window. Callers are authenticated; unknown identifiers, forbidden \
-						windows and unmapped services are rejected.""")
-				.inputSchema(mcpJsonMapper, """
+		McpSchema.Tool tool = McpSchema.Tool
+				.builder(INCIDENT_CONTEXT_TOOL, mcpJsonMapper, """
 						{
 						  "type": "object",
 						  "additionalProperties": false,
@@ -75,19 +68,28 @@ public class McpEvidenceToolsConfiguration {
 						  }
 						}
 						""")
+				.title("Incident context evidence")
+				.description("""
+						Read-only context evidence for the mapped demo incident: the assigned command, \
+						the latest log record and the diagnostic metric of its bound services for one \
+						bounded window. Callers are authenticated; unknown identifiers, forbidden \
+						windows and unmapped services are rejected.""")
 				.annotations(readOnly("Incident context evidence"))
 				.build();
-		return new McpServerFeatures.SyncToolSpecification(tool, (exchange, request) -> guarded(() -> {
-			Map<String, Object> arguments = arguments(request);
-			McpEvidenceIncidentContextResponse response = evidenceService.incidentContext(
-					stringArgument(arguments, "scenarioId"),
-					stringArgument(arguments, "incidentId"),
-					stringArgument(arguments, "scenarioRunId"),
-					stringArgument(arguments, "windowFrom"),
-					stringArgument(arguments, "windowTo")
-			);
-			return jsonResult(response);
-		}));
+		return McpServerFeatures.SyncToolSpecification.builder()
+				.tool(tool)
+				.callHandler((exchange, request) -> guarded(() -> {
+					Map<String, Object> arguments = arguments(request);
+					McpEvidenceIncidentContextResponse response = evidenceService.incidentContext(
+							stringArgument(arguments, "scenarioId"),
+							stringArgument(arguments, "incidentId"),
+							stringArgument(arguments, "scenarioRunId"),
+							stringArgument(arguments, "windowFrom"),
+							stringArgument(arguments, "windowTo")
+					);
+					return jsonResult(response);
+				}))
+				.build();
 	}
 
 	/**
@@ -96,14 +98,8 @@ public class McpEvidenceToolsConfiguration {
 	 */
 	@Bean
 	McpServerFeatures.SyncToolSpecification getServiceEvidenceTool() {
-		McpSchema.Tool tool = McpSchema.Tool.builder()
-				.name(SERVICE_SOURCE_TOOL)
-				.title("Service source evidence")
-				.description("""
-						Read-only evidence from one stand source (ITSM context, logs or the diagnostics \
-						database) explicitly bound to the mapped demo scenario run. An unavailable \
-						source fails the call and is never an empty success.""")
-				.inputSchema(mcpJsonMapper, """
+		McpSchema.Tool tool = McpSchema.Tool
+				.builder(SERVICE_SOURCE_TOOL, mcpJsonMapper, """
 						{
 						  "type": "object",
 						  "additionalProperties": false,
@@ -117,19 +113,27 @@ public class McpEvidenceToolsConfiguration {
 						  }
 						}
 						""")
+				.title("Service source evidence")
+				.description("""
+						Read-only evidence from one stand source (ITSM context, logs or the diagnostics \
+						database) explicitly bound to the mapped demo scenario run. An unavailable \
+						source fails the call and is never an empty success.""")
 				.annotations(readOnly("Service source evidence"))
 				.build();
-		return new McpServerFeatures.SyncToolSpecification(tool, (exchange, request) -> guarded(() -> {
-			Map<String, Object> arguments = arguments(request);
-			McpEvidenceSourceResponse response = evidenceService.serviceSource(new McpEvidenceServiceSourceRequest(
-					stringArgument(arguments, "incidentId"),
-					stringArgument(arguments, "scenarioRunId"),
-					stringArgument(arguments, "serviceKey"),
-					stringArgument(arguments, "windowFrom"),
-					stringArgument(arguments, "windowTo")
-			));
-			return jsonResult(response);
-		}));
+		return McpServerFeatures.SyncToolSpecification.builder()
+				.tool(tool)
+				.callHandler((exchange, request) -> guarded(() -> {
+					Map<String, Object> arguments = arguments(request);
+					McpEvidenceSourceResponse response = evidenceService.serviceSource(new McpEvidenceServiceSourceRequest(
+							stringArgument(arguments, "incidentId"),
+							stringArgument(arguments, "scenarioRunId"),
+							stringArgument(arguments, "serviceKey"),
+							stringArgument(arguments, "windowFrom"),
+							stringArgument(arguments, "windowTo")
+					));
+					return jsonResult(response);
+				}))
+				.build();
 	}
 
 	@Bean
@@ -149,17 +153,20 @@ public class McpEvidenceToolsConfiguration {
 	}
 
 	private McpSchema.CallToolResult errorResult(AppError error, String message) {
-		return McpSchema.CallToolResult.builder()
-				.addTextContent(jsonMapper.writeValueAsString(new AppErrorResponse(error.getCode(), message)))
-				.isError(true)
-				.build();
+		return new McpSchema.CallToolResult(
+				List.of(McpSchema.TextContent.builder(jsonMapper.writeValueAsString(
+						new AppErrorResponse(error.getCode(), message))).build()),
+				true,
+				null,
+				null);
 	}
 
 	private McpSchema.CallToolResult jsonResult(Object body) {
-		return McpSchema.CallToolResult.builder()
-				.addTextContent(jsonMapper.writeValueAsString(body))
-				.isError(false)
-				.build();
+		return new McpSchema.CallToolResult(
+				List.of(McpSchema.TextContent.builder(jsonMapper.writeValueAsString(body)).build()),
+				false,
+				null,
+				null);
 	}
 
 	private static Map<String, Object> arguments(McpSchema.CallToolRequest request) {

@@ -60,6 +60,8 @@ public enum AppErrors implements AppError {
 	ITSM_BAD_RESPONSE("ITSM_BAD_RESPONSE", HttpStatus.BAD_GATEWAY, "Invalid response from ITSM"),
 	ITSM_OFFLINE("ITSM_OFFLINE", HttpStatus.SERVICE_UNAVAILABLE, "ITSM is unavailable"),
 	MCP_EVIDENCE_ACCESS_DENIED("MCP_EVIDENCE_ACCESS_DENIED", HttpStatus.FORBIDDEN, "Caller is not allowed to read MCP evidence"),
+	MCP_DASHBOARD_ACCESS_DENIED("MCP_DASHBOARD_ACCESS_DENIED", HttpStatus.FORBIDDEN,
+			"Caller is not allowed to read the MCP dashboard"),
 	MCP_EVIDENCE_DEMO_SCENARIO_UNKNOWN("MCP_EVIDENCE_DEMO_SCENARIO_UNKNOWN", HttpStatus.NOT_FOUND, "MCP evidence demo scenario ${scenarioId} is not a mapped demo scenario"),
 	MCP_EVIDENCE_INCIDENT_NOT_MAPPED("MCP_EVIDENCE_INCIDENT_NOT_MAPPED", HttpStatus.NOT_FOUND, "Incident ${incidentId} has no explicit mapping to a scenario run"),
 	MCP_EVIDENCE_SCENARIO_RUN_UNKNOWN("MCP_EVIDENCE_SCENARIO_RUN_UNKNOWN", HttpStatus.NOT_FOUND, "Scenario run is not a part of the requested demo mapping"),

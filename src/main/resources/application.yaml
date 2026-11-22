@@ -139,6 +139,21 @@ mcp:
         username: ${MCP_EVIDENCE_DB_USERNAME:}
         password: ${MCP_EVIDENCE_DB_PASSWORD:}
         view: ${MCP_EVIDENCE_DB_VIEW:}
+  dashboard:
+    # Read-only MCP Dashboard tools (KAN-86) on the standard Streamable HTTP transport at
+    # POST /mcp/dashboard. Fail-closed by default; cursors are HMAC-signed, so a secret is
+    # required to continue snapshot walks. Access: an active coordinator (human JWT) or the
+    # machine agent MVP with its dedicated audience/client/role (read-only, no ITSM write
+    # scopes; assign_incident is not declared).
+    enabled: ${MCP_DASHBOARD_ENABLED:false}
+    cursor-secret: ${MCP_DASHBOARD_CURSOR_SECRET:}
+    snapshot-fresh: ${MCP_DASHBOARD_SNAPSHOT_FRESH:PT60S}
+    cursor-ttl: ${MCP_DASHBOARD_CURSOR_TTL:PT15M}
+    changes-cursor-ttl: ${MCP_DASHBOARD_CHANGES_CURSOR_TTL:P7D}
+    client:
+      audience: ${MCP_DASHBOARD_CLIENT_AUDIENCE:}
+      client-id: ${MCP_DASHBOARD_CLIENT_ID:}
+      role: ${MCP_DASHBOARD_CLIENT_ROLE:mcp:dashboard:read}
 
 logging:
   file:
