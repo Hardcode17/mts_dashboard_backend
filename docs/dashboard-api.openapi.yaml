@@ -8,6 +8,8 @@ info:
     Согласован в KAN-20 с приёмом снимков (`itsm-ingest.openapi.yaml`, KAN-27/KAN-53).
     Список, карточка и связи читаются из опубликованных снимков. Для статуса источника, polling и
     подтверждений в этой спецификации пока приведены только примеры.
+    Спецификация также описывает личные подключения каналов уведомлений (KAN-36)
+    и доставку уведомлений по этим каналам (KAN-35).
     Примеры синтетические (INC `INC0000210955xx` не пересекаются с реальной выгрузкой),
     валидируются схемами и пригодны фронту до готовности БД.
 
@@ -22,6 +24,9 @@ info:
     | Статус источника | `GET /api/dashboard/sources` | все источники, включая stale |
     | Polling | `GET /api/dashboard/events?sinceEventSeq=` | события с `eventSeq > sinceEventSeq` |
     | Подтверждение | `POST /api/dashboard/events/ack` | точный набор `eventId`, без `since` и «до» |
+    | Уведомления | `GET /api/dashboard/notifications` | свои уведомления и доставки, без адресов |
+    | Чтение в приложении | `POST /api/dashboard/notifications/{id}/read` | отдельно от чтения в канале |
+    | Повтор доставки | `POST /api/dashboard/notifications/deliveries/{id}/retry` | только упавшей, идемпотентно |
 
     Статус снимка приёма (`GET /api/snapshot/status`, KAN-27) — отдельное операционное
     чтение; здесь не дублируется.
@@ -63,6 +68,18 @@ info:
     с тем же набором — `200` без побочных эффектов. Неизвестный, чужой или уже вытесненный из
     журнала `eventId` — `400 ACK_EVENT_UNKNOWN`, ничего не подтверждается. «Подтвердить всё до
     N» не предусмотрено: клиент подтверждает только увиденное.
+
+    ## уведомления и доставка (KAN-35)
+
+    Одно значимое событие даёт одному адресату одно уведомление и отдельную строку доставки
+    на каждое разрешённое подключение (KAN-36). Состояние доставки — самый сильный известный
+    сигнал: `unknown` (сигнала нет), `sent`, `delivered`, `read_in_app` (адресат прочитал
+    уведомление в приложении дашборда), `read_in_channel` (канал сообщил о чтении); `failed`
+    — ошибка попытки. Чтение в приложении и чтение в канале независимы и не подменяют друг
+    друга. Повторить можно только `failed`: повтор любого другого состояния — идемпотентный
+    no-op без новой отправки, одновременные повторы одной доставки дают одну новую попытку.
+    Причина ошибки — короткий код (`channel_rejected_503` и т.п.), без адресов, токенов и URL.
+    Состояние сохраняется в БД и переживает рестарт backend.
 
     ## Источник и свежесть
 
@@ -109,22 +126,142 @@ security:
   - cookieAuth: []
   - machineBearer: []
 paths:
+  /api/me:
+    get:
+      operationId: getCurrentCoordinator
+      security: [{coordinatorBearer: []}]
+      summary: Текущий координатор и доступность для назначений
+      responses:
+        '200':
+          description: Текущий профиль и активные рабочие группы координатора.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CurrentCoordinator'
+              examples:
+                coordinator:
+                  summary: Профиль нового координатора с рабочей группой
+                  value:
+                    subject: demo-coordinator
+                    username: coordinator
+                    name: Дежурный координатор
+                    email: null
+                    audience: [dashboard-api]
+                    id: 1
+                    sub: demo-coordinator
+                    login: coordinator
+                    displayName: Дежурный координатор
+                    availability:
+                      available: false
+                      availableSince: null
+                      generation: 0
+                      groups: [{id: 1, name: Дежурные координаторы}]
+        '401':
+          description: Требуется человеческий Bearer JWT.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missingBearer:
+                  summary: Запрос без токена
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Профиль не имеет доступа.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                denied:
+                  summary: У аккаунта нет допуска
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+  /api/me/availability:
+    put:
+      operationId: setCurrentCoordinatorAvailability
+      security: [{coordinatorBearer: []}]
+      summary: Изменить собственную доступность для новых назначений (KAN-30)
+      description: |
+        Нужны активная учётная запись и членство хотя бы в одной активной рабочей
+        группе. Выбор действует во всех активных группах координатора. Повтор той же
+        команды не меняет момент последнего включения или счётчик включений.
+        Выключение не влияет на допуск к приложению, членство или текущее назначение.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [available]
+              properties:
+                available:
+                  type: boolean
+            examples:
+              activate:
+                summary: Включение доступности
+                value: {available: true}
+      responses:
+        '200':
+          description: Сохранённая доступность текущего координатора.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CoordinatorAvailability'
+              examples:
+                activated:
+                  summary: Подтверждённое включение
+                  value:
+                    available: true
+                    availableSince: '2026-11-21T14:30:00Z'
+                    generation: 1
+                    groups: [{id: 1, name: Дежурные координаторы}]
+        '400':
+          description: Тело отсутствует, содержит неверное значение или лишние поля.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                badBody:
+                  summary: Недопустимое тело запроса
+                  value: {code: INVALID_REQUEST_BODY, message: Request body is malformed or missing}
+        '401':
+          description: Требуется человеческий Bearer JWT.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missingBearer:
+                  summary: Запрос без токена
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Профиль заблокирован либо нет активного членства в рабочей группе.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                missingMembership:
+                  summary: Нет активной рабочей группы
+                  value: {code: COORDINATOR_GROUP_REQUIRED, message: Active coordinator group membership is required}
   /api/dashboard/incidents:
     get:
       operationId: listIncidents
       security: [{coordinatorBearer: []}]
-      summary: Список инцидентов и групп (KAN-7)
+      summary: Список инцидентов и групп (KAN-7, KAN-26)
       description: |
         Единственный маршрут списка. Без `group` — все опубликованные `Assigned` и
         `WorkInProgress`, а также `Research`: он остаётся видимым в своей группе. С `group`
         (параметр повторяется) `items` содержит объединение выбранных групп без дублей.
         `includeCompleted=false` скрывает `Resolved` и `Closed`, но не `Research`. P4 на координаторах входит
         одновременно в `critical` и `coordinator`; `groupMemberships` всегда содержит все группы INC.
-        Порядок: по `updatedAt` (если передан), иначе по времени последнего изменения на публикации,
-        а для исходной карточки — по наиболее поздней дате регистрации, назначения или устранения.
-        При равном времени — по строковому `id` по возрастанию. На первой странице счётчики
-        выбранных групп относятся ко всей выборке, а `incidents` — только к этой странице;
-        невыбранные группы пусты. На следующих страницах `groups` пуст.
+
+        Группы и все переданные фильтры пересекаются. Сортировка применяется ко всей выборке
+        перед пагинацией. На первой странице счётчики групп относятся ко всей отфильтрованной
+        выборке, а `incidents` — только к этой странице. Невыбранные группы пусты. На следующих
+        страницах `groups` пуст. CSV применяет те же фильтры и сортировку.
       parameters:
         - name: group
           in: query
@@ -153,6 +290,64 @@ paths:
             minimum: 1
             maximum: 100
             default: 50
+        - name: q
+          in: query
+          description: |
+            Полный номер INC ищется по точному совпадению без учёта регистра.
+            Для текста все слова должны встречаться в номере, заголовке, продукте
+            или назначенной команде без учёта регистра.
+          schema:
+            type: string
+        - name: priority
+          in: query
+          description: Числовой приоритет из снимка ITSM.
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 4
+        - name: product
+          in: query
+          description: Точное совпадение названия продукта.
+          schema:
+            type: string
+        - name: team
+          in: query
+          description: Точное совпадение названия назначенной команды.
+          schema:
+            type: string
+        - name: state
+          in: query
+          description: Значение `stateEnum` из ITSM. Для завершённых INC нужен `includeCompleted=true`.
+          schema:
+            type: string
+            enum: [Assigned, WorkInProgress, Resolved, Closed, Research]
+        - name: serviceType
+          in: query
+          description: Точное совпадение типа сервиса.
+          schema:
+            type: string
+        - name: deadline
+          in: query
+          description: |
+            `none` — срок отсутствует. `late` — срок активного INC строго раньше времени
+            сервера. `near` — срок активного INC от времени сервера до 20 минут вперёд
+            включительно. Если состав выборки изменился со временем, обновите первую страницу.
+          schema:
+            type: string
+            enum: [none, late, near]
+        - name: sort
+          in: query
+          description: |
+            `updated` — по времени обновления, затем по `id`. Если исходное
+            `updatedAt` отсутствует, учитывается время изменения на публикации,
+            затем самая поздняя из дат регистрации, назначения и устранения.
+            `registered` — по убыванию даты регистрации, затем по `id`.
+            `deadline` — активные P4 первыми, затем по убыванию приоритета,
+            сроку от ближайшего (пустые сроки в конце), дате регистрации и `id` по возрастанию.
+          schema:
+            type: string
+            enum: [updated, registered, deadline]
+            default: updated
         - name: Accept
           in: header
           required: false
@@ -169,7 +364,7 @@ paths:
           description: Страница инцидентов с группами.
           headers:
             ETag:
-              description: 'ETag на основе `eventSeq` и параметров представления; верните его в `If-None-Match` для проверки на `304`.'
+              description: 'ETag учитывает `eventSeq`, параметры представления и состав выборки для `late` и `near`. Передайте его в `If-None-Match` для проверки на `304`.'
               schema:
                 type: string
           content:
@@ -546,6 +741,9 @@ paths:
                 invalidLimit:
                   summary: Размер страницы вне допустимого диапазона
                   value: {"code": "INVALID_LIMIT", "message": "limit must be between 1 and 100"}
+                invalidFilter:
+                  summary: Недопустимое значение фильтра или сортировки
+                  value: {"code": "INVALID_INCIDENT_FILTER", "message": "Invalid incident filter state: Unknown"}
         '401':
           description: Нет допустимой сессии или человеческого токена.
           headers:
@@ -694,7 +892,9 @@ paths:
                     remainingSeconds: 86400
                     overdue: false
                     itsmUrl: 'http://127.0.0.1:8082/itsm_incident/INC000021931151/page'
+                    meetingUrl: null
                     itsmDemo: true
+                    confirmedLinks: []
                     groupMemberships: []
                     deadlineRisk:
                       risk: medium
@@ -835,7 +1035,9 @@ paths:
                     remainingSeconds: null
                     overdue: false
                     itsmUrl: 'http://127.0.0.1:8082/api/mock/incidents/INC000021095532'
+                    meetingUrl: null
                     itsmDemo: true
+                    confirmedLinks: []
                     groupMemberships:
                       - group: coordinator
                         matchedRule: assignedToCoordinators
@@ -874,7 +1076,9 @@ paths:
                     remainingSeconds: null
                     overdue: false
                     itsmUrl: 'http://127.0.0.1:8082/api/mock/incidents/INC000021095539'
+                    meetingUrl: null
                     itsmDemo: true
+                    confirmedLinks: []
                     groupMemberships:
                       - group: coordinator
                         matchedRule: assignedToCoordinators
@@ -913,7 +1117,9 @@ paths:
                     remainingSeconds: null
                     overdue: false
                     itsmUrl: 'http://127.0.0.1:8082/api/mock/incidents/INC000021095537'
+                    meetingUrl: null
                     itsmDemo: true
+                    confirmedLinks: []
                     groupMemberships: []
                     deadlineRisk:
                       risk: unknown
@@ -948,6 +1154,7 @@ paths:
                     remainingSeconds: 7200
                     overdue: false
                     itsmUrl: 'http://127.0.0.1:8082/api/mock/incidents/INC000021095531'
+                    meetingUrl: null
                     itsmDemo: true
                     groupMemberships:
                       - group: coordinator
@@ -963,6 +1170,7 @@ paths:
                         - code: deadline_extended
                           text: Дедлайн уже продлевался 1 раз
                       score: 4.0
+                    confirmedLinks: []
                     eventSeq: 43
                     revision: 42
         '400':
@@ -1008,6 +1216,240 @@ paths:
                     message: Incident not found
                     eventSeq: 0
                     revision: 0
+  '/api/dashboard/incidents/{incidentId}/confirmed-links':
+    post:
+      operationId: confirmIncidentLink
+      summary: Подтвердить связь двух инцидентов (KAN-41)
+      description: |
+        Подтверждает связь двух опубликованных INC от имени координатора.
+        У related_to номера упорядочены по возрастанию. У causes и duplicate_of
+        направление идёт от INC в пути к INC в теле. Повтор возвращает ту же связь
+        с исходными автором и временем. Связь видна в обеих карточках.
+      security: [{coordinatorBearer: []}]
+      parameters:
+        - {name: incidentId, in: path, required: true, schema: {$ref: '#/components/schemas/IncidentId'}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [targetIncidentId, kind]
+              properties:
+                targetIncidentId: {$ref: '#/components/schemas/IncidentId'}
+                kind: {$ref: '#/components/schemas/IncidentLinkKind'}
+            examples:
+              relatedTo:
+                summary: Подтвердить симметричную связь
+                value: {targetIncidentId: INC000021095532, kind: related_to}
+      responses:
+        '200':
+          description: Сохранённая связь, включая результат повтора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ConfirmedIncidentLink'}
+              examples:
+                relatedTo:
+                  summary: Подтверждённая связь с автором и временем
+                  value:
+                    id: 21
+                    sourceIncidentId: INC000021095531
+                    targetIncidentId: INC000021095532
+                    kind: related_to
+                    confirmedByUserId: 7
+                    createdAt: '2026-11-21T09:00:00Z'
+        '400':
+          description: Недопустимые номер, тип связи или тело запроса.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                selfLink:
+                  summary: Инцидент нельзя связать с собой
+                  value: {code: INVALID_INCIDENT_LINK, message: An incident link needs two different incidents and a supported kind}
+                invalidId:
+                  summary: Неверный формат номера
+                  value: {code: INVALID_INCIDENT_ID, message: incidentId must be an INC identifier such as INC000021095531}
+                invalidBody:
+                  summary: Неверный синтаксис запроса
+                  value: {code: INVALID_REQUEST_BODY, message: Request body is malformed or missing}
+        '401':
+          description: Нет действительного Bearer JWT.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                missingToken:
+                  summary: Нет токена координатора
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Пользователь не допущен к рабочему месту координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                noAccess:
+                  summary: Нет локального допуска
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+        '404':
+          description: Один из INC отсутствует в опубликованных данных.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentNotFound'}
+              examples:
+                missingIncident:
+                  summary: Целевой INC не найден
+                  value:
+                    code: INCIDENT_NOT_FOUND
+                    message: Incident INC000021095532 not found
+                    eventSeq: 43
+                    revision: 42
+  '/api/incidents/{id}/meeting-link':
+    put:
+      operationId: saveMeetingLink
+      summary: Сохранить или заменить ссылку МТС Линк (KAN-37)
+      description: |
+        Локальная ссылка возвращается полем meetingUrl в GET /api/dashboard/incidents/{incidentId}.
+        Обновление сохраняет остальные ссылки инцидента, повторный импорт ITSM сохраняет локальную ссылку.
+        Допускается абсолютный HTTP(S) URL с хостом, без логина и пароля в адресе.
+      security: [{coordinatorBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {$ref: '#/components/schemas/IncidentId'}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [meetingUrl]
+              additionalProperties: false
+              properties:
+                meetingUrl: {type: string, format: uri, pattern: '^https?://'}
+            examples:
+              meeting:
+                summary: Ссылка на встречу
+                value: {meetingUrl: 'https://link.example.test/meeting/42'}
+      responses:
+        '204':
+          description: Ссылка сохранена.
+        '400':
+          description: Неверный номер INC, формат запроса или URL.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                invalidLink:
+                  summary: Неподдерживаемая ссылка
+                  value: {code: INVALID_MEETING_LINK, message: meetingUrl must be an absolute HTTP or HTTPS URL without embedded credentials}
+                invalidId:
+                  summary: Неверный формат номера
+                  value: {code: INVALID_INCIDENT_ID, message: incidentId must be an INC identifier such as INC000021095531}
+                malformedJson:
+                  summary: Некорректный JSON
+                  value: {code: INVALID_REQUEST_BODY, message: Request body is malformed or missing}
+        '401':
+          description: Нет действительного Bearer JWT.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                missingToken:
+                  summary: Нет токена координатора
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Пользователь не допущен к рабочему месту координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                noAccess:
+                  summary: Нет локального допуска
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+        '404':
+          description: INC отсутствует в опубликованных данных.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentNotFound'}
+              examples:
+                missingIncident:
+                  summary: Инцидент не найден
+                  value: {code: INCIDENT_NOT_FOUND, message: Incident INC000021095531 not found, eventSeq: 43, revision: 42}
+  '/api/dashboard/incidents/{incidentId}/postmortem':
+    get:
+      operationId: getIncidentPostmortemDraft
+      summary: Последний черновик постмортема (KAN-51)
+      description: |
+        Черновик фиксирует доступные факты при явном переходе в Resolved.
+        Содержит до 100 записей истории, заметок и фактов последнего расследования.
+        При недостатке данных список gaps указывает, какие источники недоступны.
+        Поле rootCause содержит null, пока причина не подтверждена.
+      security: [{coordinatorBearer: []}]
+      parameters:
+        - name: incidentId
+          in: path
+          required: true
+          schema: {$ref: '#/components/schemas/IncidentId'}
+      responses:
+        '200':
+          description: Сохранённый черновик.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/PostmortemDraft'}
+              examples:
+                resolved:
+                  summary: Смена наблюдала восстановление, источник диагностики недоступен
+                  value:
+                    incidentId: INC000021095531
+                    resolutionEventSeq: 44
+                    observedAt: '2026-11-21T13:45:00Z'
+                    resolutionText: Сервис восстановлен
+                    rootCause: null
+                    timeline:
+                      - eventSeq: 44
+                        observedAt: '2026-11-21T13:45:00Z'
+                        changeKind: UPDATED
+                        beforeState: WorkInProgress
+                        afterState: Resolved
+                        href: /api/dashboard/incidents/INC000021095531/history
+                    notes: []
+                    evidence: []
+                    gaps: [EVIDENCE_UNAVAILABLE]
+        '400':
+          description: Некорректный номер инцидента.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                invalidId:
+                  summary: Ожидается строковый номер инцидента
+                  value: {code: INVALID_INCIDENT_ID, message: 'incidentId must be an INC identifier such as INC000021095531'}
+        '401':
+          description: Требуется токен координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                unauthorized:
+                  summary: Токен отсутствует
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                forbidden:
+                  summary: Пользователю не выдан допуск
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+        '404':
+          description: У инцидента нет черновика.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                absent:
+                  summary: Явное решение ещё не наблюдалось
+                  value: {code: POSTMORTEM_DRAFT_NOT_FOUND, message: No postmortem draft for incident INC000021095531}
   '/api/dashboard/incidents/{incidentId}/similar':
     get:
       operationId: suggestSimilarIncidents
@@ -1601,6 +2043,889 @@ paths:
                 cookieAuthRequired:
                   summary: Нет сессии интерфейса
                   value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
+  /api/dashboard/notification-connections:
+    get:
+      operationId: listNotificationConnections
+      summary: Получить свои настройки уведомлений (KAN-36)
+      description: Возвращает все подключения координатора по возрастанию ID, включая выключенные.
+      security:
+        - coordinatorBearer: []
+      responses:
+        '200':
+          description: Личные подключения. Пустой список допустим.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/NotificationConnection'
+              examples:
+                noConnections:
+                  summary: Настройки ещё не созданы
+                  value: []
+                emailP4:
+                  summary: Email для P4
+                  value:
+                    - { id: 12, channel: email, address: coordinator@example.test, active: true, priorityIds: [4] }
+        '401':
+          description: Нужен токен координатора.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                authenticationRequired:
+                  summary: Нет действительного токена
+                  value: { code: HUMAN_AUTH_REQUIRED, message: Human access token is required }
+        '403':
+          description: У пользователя нет локального допуска.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                coordinatorAccessDenied:
+                  summary: Нет допуска
+                  value: { code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted }
+    post:
+      operationId: createNotificationConnection
+      summary: Добавить личное подключение (KAN-36)
+      description: Можно создать несколько независимых подключений одного типа.
+      security:
+        - coordinatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationConnectionSettings' }
+            examples:
+              emailP4:
+                summary: Стендовое подключение для P4
+                value: { channel: email, address: coordinator@example.test, active: true, priorityIds: [4] }
+      responses:
+        '201':
+          description: Подключение создано.
+          headers:
+            Location:
+              description: Путь к созданному подключению.
+              schema:
+                type: string
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationConnection'
+              examples:
+                created:
+                  summary: Сохранённое подключение
+                  value: { id: 12, channel: email, address: coordinator@example.test, active: true, priorityIds: [4] }
+        '400':
+          description: Неверные настройки или некорректный JSON.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                invalidSettings:
+                  summary: Неподдерживаемый приоритет
+                  value: { code: INVALID_NOTIFICATION_CONNECTION, message: Invalid notification connection settings }
+                invalidJson:
+                  summary: Неверный синтаксис запроса
+                  value: { code: INVALID_REQUEST_BODY, message: Request body is malformed or missing }
+        '401':
+          description: Нужен токен координатора.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                authenticationRequired:
+                  summary: Нет действительного токена
+                  value: { code: HUMAN_AUTH_REQUIRED, message: Human access token is required }
+        '403':
+          description: У пользователя нет локального допуска.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                coordinatorAccessDenied:
+                  summary: Нет допуска
+                  value: { code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted }
+  /api/dashboard/notification-connections/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+    get:
+      operationId: getNotificationConnection
+      summary: Получить личное подключение (KAN-36)
+      security:
+        - coordinatorBearer: []
+      responses:
+        '200':
+          description: Настройки подключения.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationConnection'
+              examples:
+                emailP4:
+                  summary: Текущее подключение для P4
+                  value: { id: 12, channel: email, address: coordinator@example.test, active: true, priorityIds: [4] }
+        '401':
+          description: Нужен токен координатора.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                authenticationRequired:
+                  summary: Нет действительного токена
+                  value: { code: HUMAN_AUTH_REQUIRED, message: Human access token is required }
+        '403':
+          description: У пользователя нет локального допуска.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                coordinatorAccessDenied:
+                  summary: Нет допуска
+                  value: { code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted }
+        '404':
+          description: Личное подключение не найдено.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                connectionNotFound:
+                  summary: Чужой или неизвестный ID
+                  value: { code: NOTIFICATION_CONNECTION_NOT_FOUND, message: Notification connection not found }
+    put:
+      operationId: updateNotificationConnection
+      summary: Сохранить настройки личного подключения (KAN-36)
+      description: |
+        Заменяет настройки и список приоритетов. При `active: false` подключение остаётся
+        в настройках, но исключается из маршрутизации. Пустой список приоритетов также
+        исключает его из маршрутизации. Опущенный `secretRef` сохраняет прежнюю ссылку,
+        если тип канала тот же. `secretRef: null` удаляет ссылку.
+      security:
+        - coordinatorBearer: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: '#/components/schemas/NotificationConnectionSettings' }
+            examples:
+              disableEmail:
+                summary: Выключить подключение для P4
+                value: { channel: email, address: coordinator@example.test, active: false, priorityIds: [4] }
+      responses:
+        '200':
+          description: Настройки сохранены.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationConnection'
+              examples:
+                disabled:
+                  summary: Выключенное подключение
+                  value: { id: 12, channel: email, address: coordinator@example.test, active: false, priorityIds: [4] }
+        '400':
+          description: Неверные настройки или некорректный JSON.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                invalidSettings:
+                  summary: Неподдерживаемый приоритет
+                  value: { code: INVALID_NOTIFICATION_CONNECTION, message: Invalid notification connection settings }
+                invalidJson:
+                  summary: Неверный синтаксис запроса
+                  value: { code: INVALID_REQUEST_BODY, message: Request body is malformed or missing }
+        '401':
+          description: Нужен токен координатора.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                authenticationRequired:
+                  summary: Нет действительного токена
+                  value: { code: HUMAN_AUTH_REQUIRED, message: Human access token is required }
+        '403':
+          description: У пользователя нет локального допуска.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                coordinatorAccessDenied:
+                  summary: Нет допуска
+                  value: { code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted }
+        '404':
+          description: Личное подключение не найдено.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                connectionNotFound:
+                  summary: Чужой или неизвестный ID
+                  value: { code: NOTIFICATION_CONNECTION_NOT_FOUND, message: Notification connection not found }
+  /api/dashboard/notifications:
+    get:
+      operationId: listNotifications
+      summary: Получить свои уведомления (KAN-35)
+      description: |
+        Уведомления адресата по убыванию `id` вместе с одной строкой доставки на каждое
+        разрешённое подключение. Сырые адреса и ссылки на секреты в ответе отсутствуют:
+        доставка адресуется идентификатором подключения и кодом канала. Состояние
+        `readInAppAt` — подтверждение чтения в приложении дашборда и не зависит от чтения
+        в канале.
+      security:
+        - coordinatorBearer: []
+      responses:
+        '200':
+          description: Свои уведомления. Пустой список допустим.
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: '#/components/schemas/DashboardNotification'
+              examples:
+                noNotifications:
+                  summary: Уведомлений ещё нет
+                  value: []
+                p4WithDeliveries:
+                  summary: P4 с успешной и упавшей доставкой
+                  value:
+                    - id: 71
+                      incidentId: INC000021095532
+                      priorityId: 4
+                      title: P4 назначен на вас
+                      body: 'INC000021095532 стал критическим и требует реакции смены.'
+                      createdAt: '2026-11-21T09:30:12Z'
+                      readInAppAt: '2026-11-21T09:31:03Z'
+                      deliveries:
+                        - id: 901
+                          connectionId: 12
+                          channel: email
+                          state: sent
+                          failureReason: null
+                          attempts: 1
+                          sentAt: '2026-11-21T09:30:12Z'
+                          deliveredAt: null
+                          readInChannelAt: null
+                          readInAppAt: '2026-11-21T09:31:03Z'
+                          lastAttemptAt: '2026-11-21T09:30:12Z'
+                        - id: 902
+                          connectionId: 13
+                          channel: telegram
+                          state: failed
+                          failureReason: channel_rejected_503
+                          attempts: 1
+                          sentAt: null
+                          deliveredAt: null
+                          readInChannelAt: null
+                          readInAppAt: '2026-11-21T09:31:03Z'
+                          lastAttemptAt: '2026-11-21T09:30:12Z'
+        '401':
+          description: Нужен токен координатора.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                authenticationRequired:
+                  summary: Нет действительного токена
+                  value: { code: HUMAN_AUTH_REQUIRED, message: Human access token is required }
+        '403':
+          description: У пользователя нет локального допуска.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                coordinatorAccessDenied:
+                  summary: Нет допуска
+                  value: { code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted }
+  /api/dashboard/notifications/{id}/read:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+    post:
+      operationId: markNotificationRead
+      summary: Подтвердить чтение уведомления в приложении (KAN-35)
+      description: |
+        Отдельно от чтения в канале: помечает уведомление и его доставки `readInAppAt`,
+        не меняет уже подтверждённую доставку или чтение в канале и не отправляет ничего
+        повторно. Повторный вызов идемпотентен и сохраняет первое время чтения.
+      security:
+        - coordinatorBearer: []
+      responses:
+        '200':
+          description: Уведомление помечено прочитанным в приложении.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/DashboardNotification'
+              examples:
+                readInApp:
+                  summary: Прочитано в приложении, доставки не менялись
+                  value:
+                    id: 71
+                    incidentId: INC000021095532
+                    priorityId: 4
+                    title: P4 назначен на вас
+                    body: 'INC000021095532 стал критическим и требует реакции смены.'
+                    createdAt: '2026-11-21T09:30:12Z'
+                    readInAppAt: '2026-11-21T09:31:03Z'
+                    deliveries:
+                      - id: 901
+                        connectionId: 12
+                        channel: email
+                        state: read_in_app
+                        failureReason: null
+                        attempts: 1
+                        sentAt: '2026-11-21T09:30:12Z'
+                        deliveredAt: null
+                        readInChannelAt: null
+                        readInAppAt: '2026-11-21T09:31:03Z'
+                        lastAttemptAt: '2026-11-21T09:30:12Z'
+        '401':
+          description: Нужен токен координатора.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                authenticationRequired:
+                  summary: Нет действительного токена
+                  value: { code: HUMAN_AUTH_REQUIRED, message: Human access token is required }
+        '403':
+          description: У пользователя нет локального допуска.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                coordinatorAccessDenied:
+                  summary: Нет допуска
+                  value: { code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted }
+        '404':
+          description: Уведомление не найдено.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                notificationNotFound:
+                  summary: Чужой или неизвестный ID
+                  value: { code: NOTIFICATION_NOT_FOUND, message: Notification not found }
+  /api/dashboard/notifications/deliveries/{id}/retry:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema:
+          type: integer
+          format: int64
+          minimum: 1
+    post:
+      operationId: retryNotificationDelivery
+      summary: Повторить одну упавшую доставку (KAN-35)
+      description: |
+        Повторяет только доставку в состоянии `failed`. Повтор доставки в любом другом
+        состоянии — идемпотентный no-op: `200` с текущим состоянием и без новой отправки,
+        успешные доставки не дублируются. Одновременные повторы одной доставки сериализуются
+        в одну новую попытку. `failureReason` — короткий код без адресов, токенов и URL.
+      security:
+        - coordinatorBearer: []
+      responses:
+        '200':
+          description: Текущее состояние доставки; для `failed` — результат новой попытки.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/NotificationDelivery'
+              examples:
+                retriedSuccessfully:
+                  summary: Упавшая доставка доставлена повторно
+                  value:
+                    id: 902
+                    connectionId: 13
+                    channel: telegram
+                    state: sent
+                    failureReason: null
+                    attempts: 2
+                    sentAt: '2026-11-21T09:33:40Z'
+                    deliveredAt: null
+                    readInChannelAt: null
+                    readInAppAt: null
+                    lastAttemptAt: '2026-11-21T09:33:40Z'
+                alreadySuccessful:
+                  summary: Повтор успешной доставки — no-op без новой отправки
+                  value:
+                    id: 901
+                    connectionId: 12
+                    channel: email
+                    state: sent
+                    failureReason: null
+                    attempts: 1
+                    sentAt: '2026-11-21T09:30:12Z'
+                    deliveredAt: null
+                    readInChannelAt: null
+                    readInAppAt: null
+                    lastAttemptAt: '2026-11-21T09:30:12Z'
+        '401':
+          description: Нужен токен координатора.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                authenticationRequired:
+                  summary: Нет действительного токена
+                  value: { code: HUMAN_AUTH_REQUIRED, message: Human access token is required }
+        '403':
+          description: У пользователя нет локального допуска.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                coordinatorAccessDenied:
+                  summary: Нет допуска
+                  value: { code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted }
+        '404':
+          description: Доставка не найдена.
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/ErrorResponse' }
+              examples:
+                deliveryNotFound:
+                  summary: Чужой или неизвестный ID
+                  value: { code: NOTIFICATION_DELIVERY_NOT_FOUND, message: Notification delivery not found }
+
+  /api/dashboard/incident-presets:
+    get:
+      operationId: listIncidentPresets
+      summary: Список моих пресетов (KAN-45)
+      security: [{coordinatorBearer: []}]
+      responses:
+        '200':
+          description: Личные пресеты.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/IncidentPreset'}
+              examples:
+                saved:
+                  summary: Личный фильтр координатора
+                  value: [{id: 12, name: Просроченные платежи, queue: all, filters: {product: Платёжный шлюз, deadline: late, priority: "3"}}]
+        '401':
+          description: Нет токена координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                missingToken:
+                  summary: Нет токена координатора
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                accessDenied:
+                  summary: Нет допуска координатора
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+    post:
+      operationId: createIncidentPreset
+      summary: Создать личный пресет (KAN-45)
+      security: [{coordinatorBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IncidentPresetSettings'}
+            examples:
+              search:
+                summary: Фильтры для списка
+                value: {name: Просроченные платежи, queue: all, filters: {product: Платёжный шлюз, deadline: late, priority: "3"}}
+      responses:
+        '201':
+          description: Сохранённый пресет.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentPreset'}
+              examples:
+                saved:
+                  summary: Личный фильтр координатора
+                  value: {id: 12, name: Просроченные платежи, queue: all, filters: {product: Платёжный шлюз, deadline: late, priority: "3"}}
+        '400':
+          description: Некорректный пресет.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                invalidPreset:
+                  summary: Некорректный пресет
+                  value: {code: INVALID_INCIDENT_PRESET, message: Invalid incident preset}
+        '401':
+          description: Нет токена координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                missingToken:
+                  summary: Нет токена координатора
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                accessDenied:
+                  summary: Нет допуска координатора
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+        '409':
+          description: У координатора уже есть пресет с таким именем.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                duplicateName:
+                  summary: У координатора уже есть пресет с таким именем
+                  value: {code: INCIDENT_PRESET_NAME_EXISTS, message: An incident preset with this name already exists}
+  /api/dashboard/incident-presets/{id}:
+    get:
+      operationId: getIncidentPreset
+      summary: Прочитать свой пресет (KAN-45)
+      security: [{coordinatorBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, format: int64}
+      responses:
+        '200':
+          description: Сохранённый пресет.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentPreset'}
+              examples:
+                saved:
+                  summary: Личный фильтр координатора
+                  value: {id: 12, name: Просроченные платежи, queue: all, filters: {product: Платёжный шлюз, deadline: late, priority: "3"}}
+        '401':
+          description: Нет токена координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                missingToken:
+                  summary: Нет токена координатора
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                accessDenied:
+                  summary: Нет допуска координатора
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+        '404':
+          description: Пресет отсутствует у текущего координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                unknownPreset:
+                  summary: Пресет отсутствует у текущего координатора
+                  value: {code: INCIDENT_PRESET_NOT_FOUND, message: Incident preset was not found}
+    put:
+      operationId: updateIncidentPreset
+      summary: Изменить свой пресет (KAN-45)
+      security: [{coordinatorBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, format: int64}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/IncidentPresetSettings'}
+            examples:
+              search:
+                summary: Фильтры для списка
+                value: {name: Просроченные платежи, queue: all, filters: {product: Платёжный шлюз, deadline: late, priority: "3"}}
+      responses:
+        '200':
+          description: Сохранённый пресет.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentPreset'}
+              examples:
+                saved:
+                  summary: Личный фильтр координатора
+                  value: {id: 12, name: Просроченные платежи, queue: all, filters: {product: Платёжный шлюз, deadline: late, priority: "3"}}
+        '400':
+          description: Некорректный пресет.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                invalidPreset:
+                  summary: Некорректный пресет
+                  value: {code: INVALID_INCIDENT_PRESET, message: Invalid incident preset}
+        '401':
+          description: Нет токена координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                missingToken:
+                  summary: Нет токена координатора
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                accessDenied:
+                  summary: Нет допуска координатора
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+        '404':
+          description: Пресет отсутствует у текущего координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                unknownPreset:
+                  summary: Пресет отсутствует у текущего координатора
+                  value: {code: INCIDENT_PRESET_NOT_FOUND, message: Incident preset was not found}
+        '409':
+          description: У координатора уже есть пресет с таким именем.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                duplicateName:
+                  summary: У координатора уже есть пресет с таким именем
+                  value: {code: INCIDENT_PRESET_NAME_EXISTS, message: An incident preset with this name already exists}
+    delete:
+      operationId: deleteIncidentPreset
+      summary: Удалить свой пресет (KAN-45)
+      security: [{coordinatorBearer: []}]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: {type: integer, format: int64}
+      responses:
+        '204':
+          description: Пресет удалён.
+        '401':
+          description: Нет токена координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                missingToken:
+                  summary: Нет токена координатора
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                accessDenied:
+                  summary: Нет допуска координатора
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+        '404':
+          description: Пресет отсутствует у текущего координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                unknownPreset:
+                  summary: Пресет отсутствует у текущего координатора
+                  value: {code: INCIDENT_PRESET_NOT_FOUND, message: Incident preset was not found}
+
+  /api/dashboard/incidents/changes:
+    get:
+      operationId: listIncidentChanges
+      summary: Прочитать события по общему курсору (KAN-28, KAN-46)
+      description: Общий порядок по eventSeq. Для следующей страницы передать полученный lastEventSeq.
+      security: [{coordinatorBearer: []}]
+      parameters:
+        - {name: afterEventSeq, in: query, schema: {type: integer, format: int64, minimum: 0, default: 0}}
+        - {name: limit, in: query, schema: {type: integer, minimum: 1, maximum: 100, default: 100}}
+      responses:
+        '200':
+          description: Журнал изменений ITSM и локальных событий.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentChangesPage'}
+              examples:
+                deadlineWarning:
+                  summary: Предупреждение о сроке
+                  value: {events: [{eventSeq: 44, eventId: local-44, incidentId: INC000021095531, sourceId: null, sourceVersion: null, changeRevision: 42, changeKind: DEADLINE_APPROACHING, observedAt: '2026-11-21T13:45:00Z', sourceTime: null, fields: [], details: {deadline: '2026-11-21T14:00:00Z', ruleVersion: 1}}], hasMore: false, lastEventSeq: 44}
+        '401':
+          description: Требуется токен координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Требуется токен координатора.
+                  value: {code: AUTH_REQUIRED, message: Authentication is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Нет допуска координатора.
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+  '/api/dashboard/incidents/{incidentId}/history':
+    get:
+      operationId: getIncidentHistory
+      summary: Прочитать общую хронологию INC (KAN-28, KAN-46)
+      security: [{coordinatorBearer: []}]
+      parameters:
+        - {name: incidentId, in: path, required: true, schema: {$ref: '#/components/schemas/IncidentId'}}
+      responses:
+        '200':
+          description: События INC по eventSeq и время последнего наблюдения ITSM.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentHistory'}
+              examples:
+                deadlineWarning:
+                  summary: Локальное событие в хронологии
+                  value: {incidentId: INC000021095531, lastObservedAt: '2026-11-21T13:41:00Z', events: [{eventSeq: 44, eventId: local-44, incidentId: INC000021095531, sourceId: null, sourceVersion: null, changeRevision: 42, changeKind: DEADLINE_APPROACHING, observedAt: '2026-11-21T13:45:00Z', sourceTime: null, fields: [], details: {deadline: '2026-11-21T14:00:00Z', ruleVersion: 1}}]}
+        '401':
+          description: Требуется токен координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Требуется токен координатора.
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Нет допуска координатора.
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+        '404':
+          description: Неизвестный INC.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/IncidentNotFound'}
+              examples:
+                error:
+                  summary: Неизвестный INC.
+                  value: {code: INCIDENT_NOT_FOUND, message: Incident INC000021095531 not found, eventSeq: 43, revision: 42}
+  /api/dashboard/deadline-warning-rule:
+    get:
+      operationId: getDeadlineWarningRule
+      summary: Прочитать порог предупреждения о сроке (KAN-46)
+      security: [{coordinatorBearer: []}]
+      responses:
+        '200':
+          description: Сохранённый порог в секундах и его версия.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeadlineWarningRule'}
+              examples:
+                rule:
+                  summary: Порог 15 минут
+                  value: {thresholdSeconds: 900, version: 1}
+        '401':
+          description: Требуется токен координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Требуется токен координатора.
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Нет допуска координатора.
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+    put:
+      operationId: setDeadlineWarningRule
+      summary: Настроить порог предупреждения о сроке (KAN-46)
+      description: Версия увеличивается при изменении порога. Повтор значения сохраняет версию.
+      security: [{coordinatorBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [thresholdSeconds]
+              properties:
+                thresholdSeconds: {type: integer, format: int32, minimum: 1, maximum: 2147483647}
+            examples:
+              threshold:
+                summary: Порог 10 минут
+                value: {thresholdSeconds: 600}
+      responses:
+        '200':
+          description: Сохранённое правило.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/DeadlineWarningRule'}
+              examples:
+                updated:
+                  summary: Новая версия порога
+                  value: {thresholdSeconds: 600, version: 2}
+        '400':
+          description: Некорректный порог.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Некорректный порог.
+                  value: {code: INVALID_DEADLINE_WARNING_RULE, message: thresholdSeconds must be a positive 32-bit integer}
+        '401':
+          description: Требуется токен координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Требуется токен координатора.
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Нет допуска координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                error:
+                  summary: Нет допуска координатора.
+                  value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
+
 components:
   securitySchemes:
     coordinatorBearer:
@@ -1622,6 +2947,330 @@ components:
         Проверяются `iss`, подпись JWKS, `exp`, `aud`; остальное — как `machineBearer` в
         `itsm-ingest.openapi.yaml`.
   schemas:
+    NotificationChannel:
+      type: string
+      enum: [email, sms, push, telegram, mattermost, max, mts_link, mobile_hub, mts_notifica]
+    NotificationAddress:
+      type: string
+      pattern: '^[a-zA-Z0-9@+_.-]{1,254}$'
+      description: Синтетический адрес или идентификатор стенда.
+      examples: [coordinator@example.test]
+    NotificationPriorityIds:
+      type: array
+      uniqueItems: true
+      maxItems: 4
+      items:
+        type: integer
+        enum: [1, 2, 3, 4]
+    NotificationConnectionSettings:
+      type: object
+      additionalProperties: false
+      required: [channel, address, active, priorityIds]
+      properties:
+        channel:
+          $ref: '#/components/schemas/NotificationChannel'
+        address:
+          $ref: '#/components/schemas/NotificationAddress'
+        active:
+          type: boolean
+        priorityIds:
+          $ref: '#/components/schemas/NotificationPriorityIds'
+        secretRef:
+          type: [string, 'null']
+          pattern: '^[A-Z][A-Z0-9_]{0,99}$'
+          writeOnly: true
+          description: Имя секрета в окружении. В теле запроса передаётся только имя.
+    NotificationConnection:
+      type: object
+      additionalProperties: false
+      required: [id, channel, address, active, priorityIds]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        channel:
+          $ref: '#/components/schemas/NotificationChannel'
+        address:
+          $ref: '#/components/schemas/NotificationAddress'
+        active:
+          type: boolean
+        priorityIds:
+          $ref: '#/components/schemas/NotificationPriorityIds'
+    PostmortemDraft:
+      type: object
+      required: [incidentId, resolutionEventSeq, observedAt, resolutionText, rootCause, timeline, notes, evidence, gaps]
+      properties:
+        incidentId: {$ref: '#/components/schemas/IncidentId'}
+        resolutionEventSeq: {$ref: '#/components/schemas/EventSeq'}
+        observedAt: {$ref: '#/components/schemas/UtcInstant'}
+        resolutionText: {type: [string, 'null']}
+        rootCause: {type: [string, 'null']}
+        timeline:
+          type: array
+          items:
+            type: object
+            required: [eventSeq, observedAt, changeKind, beforeState, afterState, href]
+            properties:
+              eventSeq: {$ref: '#/components/schemas/EventSeq'}
+              observedAt: {$ref: '#/components/schemas/UtcInstant'}
+              changeKind: {type: string}
+              beforeState: {type: [string, 'null']}
+              afterState: {type: [string, 'null']}
+              href: {type: string}
+        notes:
+          type: array
+          items:
+            type: object
+            required: [noteId, eventSeq, observedAt, text, href]
+            properties:
+              noteId: {type: string}
+              eventSeq: {$ref: '#/components/schemas/EventSeq'}
+              observedAt: {$ref: '#/components/schemas/UtcInstant'}
+              text: {type: string}
+              href: {type: string}
+        evidence:
+          type: array
+          items:
+            type: object
+            required: [runId, evidenceId, source, serviceKey, observedAt, message, value, recordCount, serviceState, href]
+            properties:
+              runId: {type: string, format: uuid}
+              evidenceId: {type: string}
+              source: {enum: [ITSM, LOG, DATABASE]}
+              serviceKey: {type: string}
+              observedAt: {$ref: '#/components/schemas/UtcInstant'}
+              message: {type: [string, 'null']}
+              value: {type: [integer, 'null'], format: int64}
+              recordCount: {type: [integer, 'null'], format: int64}
+              serviceState: {type: [string, 'null']}
+              href: {type: string}
+        gaps:
+          type: array
+          items:
+            enum: [EVIDENCE_UNAVAILABLE, SOURCE_UNAVAILABLE_ITSM, SOURCE_UNAVAILABLE_LOG, SOURCE_UNAVAILABLE_DATABASE]
+    CurrentCoordinator:
+      type: object
+      required: [subject, audience, id, sub, login, displayName, availability]
+      properties:
+        subject: {type: string}
+        username: {type: [string, 'null']}
+        name: {type: [string, 'null']}
+        email: {type: [string, 'null']}
+        audience:
+          type: array
+          items: {type: string}
+        id: {type: integer, format: int64}
+        sub: {type: string}
+        login: {type: string}
+        displayName: {type: string}
+        availability:
+          $ref: '#/components/schemas/CoordinatorAvailability'
+    CoordinatorAvailability:
+      type: object
+      required: [available, availableSince, generation, groups]
+      properties:
+        available:
+          type: boolean
+          description: Можно ли назначать координатору новые задачи сейчас.
+        availableSince:
+          type: [string, 'null']
+          format: date-time
+          description: Момент последнего включения в UTC. До первого включения равен null.
+        generation:
+          type: integer
+          format: int64
+          minimum: 0
+          description: Увеличивается только при переходе из недоступен в доступен.
+        groups:
+          type: array
+          items:
+            type: object
+            required: [id, name]
+            properties:
+              id: {type: integer, format: int64}
+              name: {type: string}
+    NotificationDeliveryState:
+      type: string
+      enum: [unknown, sent, failed, delivered, read_in_app, read_in_channel]
+      description: |
+        Самый сильный известный сигнал доставки: `unknown` — сигнала нет, `sent` — канал
+        принял сообщение, `delivered` — канал подтвердил доставку, `read_in_app` — адресат
+        прочитал уведомление в приложении дашборда, `read_in_channel` — канал сообщил о
+        чтении в канале. `failed` — ошибка попытки, единственное состояние, которое можно
+        повторить. Чтение в приложении и чтение в канале не заменяют друг друга: оба
+        сохраняют собственные отметки времени.
+    DashboardNotification:
+      type: object
+      additionalProperties: false
+      required: [id, title, body, createdAt, deliveries]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        incidentId:
+          type: [string, 'null']
+          pattern: '^INC[0-9]{6,18}$'
+          description: INC события, если уведомление о нём.
+        priorityId:
+          type: [integer, 'null']
+          enum: [1, 2, 3, 4, null]
+          description: Приоритет события по подпискам KAN-36.
+        title:
+          type: string
+        body:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        readInAppAt:
+          type: [string, 'null']
+          format: date-time
+          description: Подтверждение чтения в приложении; `null`, пока адресат не подтвердил.
+        deliveries:
+          type: array
+          items:
+            $ref: '#/components/schemas/NotificationDelivery'
+    NotificationDelivery:
+      type: object
+      additionalProperties: false
+      required: [id, connectionId, channel, state, attempts]
+      properties:
+        id:
+          type: integer
+          format: int64
+          minimum: 1
+        connectionId:
+          type: integer
+          format: int64
+          minimum: 1
+          description: Ссылка на личное подключение из `/notification-connections`.
+        channel:
+          $ref: '#/components/schemas/NotificationChannel'
+        state:
+          $ref: '#/components/schemas/NotificationDeliveryState'
+        failureReason:
+          type: [string, 'null']
+          maxLength: 200
+          description: |
+            Короткий код последней неудачной попытки (например `channel_rejected_503`,
+            `channel_unavailable`, `channel_unconfigured`). Никогда не содержит адреса,
+            токены или URL.
+        attempts:
+          type: integer
+          minimum: 0
+        sentAt:
+          type: [string, 'null']
+          format: date-time
+          description: Время последней принятой каналом отправки; `null`, пока ни одна не принята.
+        deliveredAt:
+          type: [string, 'null']
+          format: date-time
+        readInChannelAt:
+          type: [string, 'null']
+          format: date-time
+        readInAppAt:
+          type: [string, 'null']
+          format: date-time
+        lastAttemptAt:
+          type: [string, 'null']
+          format: date-time
+    IncidentPresetSettings:
+      type: object
+      additionalProperties: false
+      required: [name, queue, filters]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 80
+        queue:
+          type: string
+          enum: [all, critical, coordinator, high, research]
+        filters:
+          $ref: '#/components/schemas/IncidentPresetFilters'
+    IncidentPreset:
+      type: object
+      required: [id, name, queue, filters]
+      properties:
+        id: {type: integer, format: int64}
+        name: {type: string}
+        queue: {type: string, enum: [all, critical, coordinator, high, research]}
+        filters:
+          $ref: '#/components/schemas/IncidentPresetFilters'
+    IncidentPresetFilters:
+      type: object
+      additionalProperties: false
+      description: Параметры KAN-26 и сохранённый размер страницы. sla=soon разрешён для critical.
+      properties:
+        q: {type: string, minLength: 1, maxLength: 300}
+        priority: {type: string, enum: ['1', '2', '3', '4']}
+        product: {type: string, minLength: 1, maxLength: 300}
+        team: {type: string, minLength: 1, maxLength: 300}
+        state: {type: string, enum: [Assigned, WorkInProgress, Resolved, Closed, Research]}
+        serviceType: {type: string, minLength: 1, maxLength: 300}
+        deadline: {type: string, enum: [none, late, near]}
+        sort: {type: string, enum: [updated, registered, deadline]}
+        size: {type: string, enum: ['5', '25', '50', '100']}
+        sla: {type: string, enum: [soon]}
+    IncidentChangesPage:
+      type: object
+      required: [events, hasMore, lastEventSeq]
+      properties:
+        events: {type: array, items: {$ref: '#/components/schemas/IncidentJournalEvent'}}
+        hasMore: {type: boolean}
+        lastEventSeq: {type: integer, format: int64, minimum: 0}
+    IncidentHistory:
+      type: object
+      required: [incidentId, lastObservedAt, events]
+      properties:
+        incidentId: {$ref: '#/components/schemas/IncidentId'}
+        lastObservedAt:
+          anyOf:
+            - {$ref: '#/components/schemas/UtcInstant'}
+            - {type: 'null'}
+        events: {type: array, items: {$ref: '#/components/schemas/IncidentJournalEvent'}}
+    IncidentJournalEvent:
+      type: object
+      required: [eventSeq, incidentId, sourceId, sourceVersion, changeRevision, changeKind, observedAt, sourceTime, fields]
+      properties:
+        eventSeq: {type: integer, format: int64, minimum: 1}
+        eventId: {type: string, pattern: '^local-[0-9]+$', description: Стабильный идентификатор локального события.}
+        incidentId: {$ref: '#/components/schemas/IncidentId'}
+        sourceId: {type: [string, 'null'], description: Источник ITSM. У локального события null.}
+        sourceVersion: {type: [integer, 'null'], format: int64}
+        changeRevision: {type: integer, format: int64, minimum: 0}
+        changeKind:
+          type: string
+          enum: [ADDED, UPDATED, MISSING, RETURNED, NOTE_ADDED, DEADLINE_APPROACHING]
+        observedAt: {$ref: '#/components/schemas/UtcInstant'}
+        sourceTime:
+          anyOf:
+            - {$ref: '#/components/schemas/UtcInstant'}
+            - {type: 'null'}
+        fields:
+          type: array
+          description: Пусто у локальных событий.
+          items:
+            type: object
+            required: [field, previous, current]
+            properties:
+              field: {type: string}
+              previous: {}
+              current: {}
+        details:
+          type: object
+          description: Данные локального события. DEADLINE_APPROACHING передаёт deadline и ruleVersion.
+          properties:
+            deadline: {$ref: '#/components/schemas/UtcInstant'}
+            ruleVersion: {type: integer, format: int64, minimum: 1}
+    DeadlineWarningRule:
+      type: object
+      required: [thresholdSeconds, version]
+      properties:
+        thresholdSeconds: {type: integer, format: int32, minimum: 1}
+        version: {type: integer, format: int64, minimum: 1}
     IncidentId:
       type: string
       pattern: '^INC[0-9]{6,18}$'
@@ -1829,6 +3478,20 @@ components:
           items:
             $ref: '#/components/schemas/IncidentGroupMembership'
       additionalProperties: false
+    IncidentLinkKind:
+      type: string
+      enum: [related_to, causes, duplicate_of]
+    ConfirmedIncidentLink:
+      type: object
+      additionalProperties: false
+      required: [id, sourceIncidentId, targetIncidentId, kind, confirmedByUserId, createdAt]
+      properties:
+        id: {type: integer, format: int64, minimum: 1}
+        sourceIncidentId: {$ref: '#/components/schemas/IncidentId'}
+        targetIncidentId: {$ref: '#/components/schemas/IncidentId'}
+        kind: {$ref: '#/components/schemas/IncidentLinkKind'}
+        confirmedByUserId: {type: integer, format: int64, minimum: 1}
+        createdAt: {$ref: '#/components/schemas/UtcInstant'}
     IncidentCard:
       type: object
       description: Карточка INC (карточка в ITSM).
@@ -1843,11 +3506,22 @@ components:
         - overdue
         - itsmUrl
         - itsmDemo
+        - meetingUrl
         - groupMemberships
         - deadlineRisk
+        - confirmedLinks
         - eventSeq
         - revision
       properties:
+        meetingUrl:
+          type: [string, 'null']
+          format: uri
+          pattern: '^https?://'
+          description: Локальная ссылка МТС Линк или null, если её ещё не сохранили.
+        confirmedLinks:
+          type: array
+          description: Подтверждённые координаторами связи с участием этого INC по возрастанию ID.
+          items: {$ref: '#/components/schemas/ConfirmedIncidentLink'}
         itsmUrl: {type: string, format: uri}
         remainingSeconds: {type: [integer, 'null']}
         overdue: {type: boolean}

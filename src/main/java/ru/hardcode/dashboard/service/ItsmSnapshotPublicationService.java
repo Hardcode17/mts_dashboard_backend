@@ -53,13 +53,14 @@ public class ItsmSnapshotPublicationService implements ItsmBatchProcessor {
 	private final DashboardMonitoringService monitoring;
 	private final CoordinationTaskService coordinationTasks;
 	private final Clock clock;
+	private final PostmortemDraftService postmortems;
 
 	public ItsmSnapshotPublicationService(ItsmIncidentSnapshotParser parser,
 			ItsmIncidentHierarchyResolver hierarchyResolver,
 			ItsmSnapshotPublicationRepository repository, ItsmBatchSqlRepository batches,
 			ItsmBaselineRepository domain, ItsmSnapshotMapper mapper,
 			ObjectMapper objectMapper, ApplicationEventPublisher events, DashboardMonitoringService monitoring,
-			CoordinationTaskService coordinationTasks,
+			CoordinationTaskService coordinationTasks, PostmortemDraftService postmortems,
 			Clock clock) {
 		this.parser = parser;
 		this.hierarchyResolver = hierarchyResolver;
@@ -72,6 +73,7 @@ public class ItsmSnapshotPublicationService implements ItsmBatchProcessor {
 		this.monitoring = monitoring;
 		this.coordinationTasks = coordinationTasks;
 		this.clock = clock;
+		this.postmortems = postmortems;
 	}
 
 	@Override
@@ -164,6 +166,7 @@ public class ItsmSnapshotPublicationService implements ItsmBatchProcessor {
 				ItsmBatchIntakeService.sha256(payload), appliedAt);
 		monitoring.recordPublishedSnapshot(work.batchId(), appliedAt);
 		if (!changes.isEmpty()) {
+			postmortems.capture(revision);
 			publishAfterCommit(new ItsmSnapshotPublished(work.sourceId(), work.sourceVersion(), revision,
 					changes.stream().map(Change::incidentId).collect(Collectors.toSet())));
 		}

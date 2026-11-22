@@ -19,7 +19,9 @@
   "remainingSeconds": null,
   "overdue": false,
   "itsmUrl": "http://127.0.0.1:8082/api/mock/incidents/INC000021095539",
+  "meetingUrl": null,
   "itsmDemo": true,
+  "confirmedLinks": [],
   "groupMemberships": [
     {
       "group": "coordinator",

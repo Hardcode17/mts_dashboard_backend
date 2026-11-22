@@ -80,6 +80,14 @@ deadline-risk:
     assignee-open-threshold: 5
 
 
+notifications:
+  webhook:
+    # Controlled receiver that stands in for the channel APIs of the stand (KAN-35). Blank keeps
+    # the adapter configured but every attempt fails with the sanitized channel_unconfigured reason.
+    url: ${NOTIFICATIONS_WEBHOOK_URL:}
+    connect-timeout: ${NOTIFICATIONS_WEBHOOK_CONNECT_TIMEOUT:PT2S}
+    read-timeout: ${NOTIFICATIONS_WEBHOOK_READ_TIMEOUT:PT5S}
+
 coordinator:
   access:
     user-client-ids: ${COORDINATOR_USER_CLIENT_IDS:dashboard-web}
