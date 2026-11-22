@@ -31,6 +31,10 @@
       {
         "name": "itsm:import",
         "description": "May import ITSM snapshots. Granted only to the itsm-sender service account, never to dashboard-users"
+      },
+      {
+        "name": "mcp:dashboard:read",
+        "description": "Read-only MCP Dashboard access. Granted only to the mcp-agent service account, never to dashboard-users"
       }
     ],
     "client": {
@@ -38,6 +42,12 @@
         {
           "name": "itsm:import",
           "description": "Client-scoped variant of the import permission. Humans never receive it; the machine grants it through its realm role"
+        }
+      ],
+      "mcp-agent": [
+        {
+          "name": "mcp:dashboard:read",
+          "description": "Client-scoped variant of the read-only dashboard grant. Humans never receive it; the machine agent grants it through its realm role"
         }
       ]
     }
@@ -55,6 +65,12 @@
       "enabled": true,
       "serviceAccountClientId": "itsm-sender",
       "realmRoles": ["itsm:import"]
+    },
+    {
+      "username": "service-account-mcp-agent",
+      "enabled": true,
+      "serviceAccountClientId": "mcp-agent",
+      "realmRoles": ["mcp:dashboard:read"]
     },
     {
       "username": "__DASHBOARD_TEST_USERNAME__",
@@ -149,6 +165,36 @@
           "consentRequired": false,
           "config": {
             "included.custom.audience": "itsm-ingest",
+            "access.token.claim": "true",
+            "id.token.claim": "false",
+            "introspection.token.claim": "true"
+          }
+        }
+      ],
+      "defaultClientScopes": ["basic", "service_account", "roles"],
+      "optionalClientScopes": []
+    },
+    {
+      "clientId": "mcp-agent",
+      "name": "MCP Dashboard machine agent (client credentials)",
+      "description": "Confidential machine client for the read-only MCP Dashboard tools. No human login, no ITSM write scopes.",
+      "enabled": true,
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "__MCP_AGENT_CLIENT_SECRET__",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true,
+      "protocol": "openid-connect",
+      "protocolMappers": [
+        {
+          "name": "audience-mcp-dashboard",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.custom.audience": "mcp-dashboard",
             "access.token.claim": "true",
             "id.token.claim": "false",
             "introspection.token.claim": "true"
