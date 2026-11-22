@@ -26,6 +26,7 @@ import ru.hardcode.dashboard.dto.IncidentChangesPage;
 import ru.hardcode.dashboard.dto.IncidentHistoryResponse;
 import ru.hardcode.dashboard.service.CoordinatorAccessService;
 import ru.hardcode.dashboard.service.DashboardIncidentService;
+import ru.hardcode.dashboard.service.IncidentListFilter;
 import ru.hardcode.dashboard.service.ItsmApiClient;
 import ru.hardcode.dashboard.service.ItsmIncidentChangeQueryService;
 import ru.hardcode.dashboard.service.SimilarIncidentService;
@@ -80,8 +81,13 @@ public class DashboardIncidentController {
 	@GetMapping(path = "/incidents", produces = MediaType.APPLICATION_JSON_VALUE)
 	public ResponseEntity<DashboardIncidentListResponse> list(HttpServletRequest request,
 			@RequestParam(defaultValue = "false") boolean includeCompleted,
-			@RequestParam(required = false) String cursor, @RequestParam(defaultValue = "50") int limit) {
-		var page = service.list(groups(request), includeCompleted, cursor, limit);
+			@RequestParam(required = false) String cursor, @RequestParam(defaultValue = "50") int limit,
+			@RequestParam(required = false) String q, @RequestParam(required = false) String priority,
+			@RequestParam(required = false) String product, @RequestParam(required = false) String team,
+			@RequestParam(required = false) String state, @RequestParam(required = false) String serviceType,
+			@RequestParam(required = false) String deadline, @RequestParam(required = false) String sort) {
+		var filter = IncidentListFilter.from(q, priority, product, team, state, serviceType, deadline, sort);
+		var page = service.list(groups(request), includeCompleted, filter, cursor, limit);
 		return response(page.etag()).body(page.body());
 	}
 
@@ -108,8 +114,13 @@ public class DashboardIncidentController {
 
 	@GetMapping(path = "/incidents", produces = CSV)
 	public ResponseEntity<String> export(HttpServletRequest request,
-			@RequestParam(defaultValue = "false") boolean includeCompleted) {
-		var page = service.export(groups(request), includeCompleted);
+			@RequestParam(defaultValue = "false") boolean includeCompleted,
+			@RequestParam(required = false) String q, @RequestParam(required = false) String priority,
+			@RequestParam(required = false) String product, @RequestParam(required = false) String team,
+			@RequestParam(required = false) String state, @RequestParam(required = false) String serviceType,
+			@RequestParam(required = false) String deadline, @RequestParam(required = false) String sort) {
+		var filter = IncidentListFilter.from(q, priority, product, team, state, serviceType, deadline, sort);
+		var page = service.export(groups(request), includeCompleted, filter);
 		var csv = new StringBuilder("incidentId,priorityId,stateEnum,deadline,groups\r\n");
 		for (var item : page.body().items()) {
 			csv.append(item.id()).append(',').append(item.priorityId()).append(',').append(item.stateEnum()).append(',')

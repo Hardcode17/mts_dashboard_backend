@@ -549,16 +549,39 @@ final class OpenApiContractValidator {
 				.forEach(entry -> routes.computeIfAbsent(entry.getValue().path("operationId").stringValue(""),
 						key -> new ArrayList<>()).add(entry.getKey().toUpperCase(Locale.ROOT) + " " + path.getKey())));
 		Map<String, String> canonical = new LinkedHashMap<>();
+		canonical.put("getCurrentCoordinator", "GET /api/me");
+		canonical.put("setCurrentCoordinatorAvailability", "PUT /api/me/availability");
+		canonical.put("listIncidentPresets", "GET /api/dashboard/incident-presets");
+		canonical.put("createIncidentPreset", "POST /api/dashboard/incident-presets");
+		canonical.put("getIncidentPreset", "GET /api/dashboard/incident-presets/{id}");
+		canonical.put("updateIncidentPreset", "PUT /api/dashboard/incident-presets/{id}");
+		canonical.put("deleteIncidentPreset", "DELETE /api/dashboard/incident-presets/{id}");
 		canonical.put("listIncidents", "GET " + DASHBOARD_INCIDENTS);
 		canonical.put("listItsmUsers", "GET /api/dashboard/users");
 		canonical.put("updateIncidentCard", "PATCH " + DASHBOARD_CARD);
 		canonical.put("getIncidentCard", "GET " + DASHBOARD_CARD);
+		canonical.put("listIncidentChanges", "GET " + DASHBOARD_INCIDENTS + "/changes");
+		canonical.put("getIncidentHistory", "GET " + DASHBOARD_CARD + "/history");
+		canonical.put("getDeadlineWarningRule", "GET /api/dashboard/deadline-warning-rule");
+		canonical.put("setDeadlineWarningRule", "PUT /api/dashboard/deadline-warning-rule");
 		canonical.put("suggestSimilarIncidents", "GET " + DASHBOARD_SIMILAR);
+		canonical.put("getIncidentPostmortemDraft", "GET /api/dashboard/incidents/{incidentId}/postmortem");
 		canonical.put("monitoringSummary", "GET " + DASHBOARD_MONITORING);
 		canonical.put("getIncidentRelationships", "GET " + DASHBOARD_RELATIONSHIPS);
+		canonical.put("saveMeetingLink", "PUT /api/incidents/{id}/meeting-link");
+		canonical.put("confirmIncidentLink", "POST " + DASHBOARD_CARD + "/confirmed-links");
 		canonical.put("listSources", "GET " + DASHBOARD_SOURCES);
 		canonical.put("pollEvents", "GET " + DASHBOARD_EVENTS);
 		canonical.put("acknowledgeEvents", "POST " + DASHBOARD_ACK);
+		String connections = "/api/dashboard/notification-connections";
+		canonical.put("listNotificationConnections", "GET " + connections);
+		canonical.put("createNotificationConnection", "POST " + connections);
+		canonical.put("getNotificationConnection", "GET " + connections + "/{id}");
+		canonical.put("updateNotificationConnection", "PUT " + connections + "/{id}");
+		String notifications = "/api/dashboard/notifications";
+		canonical.put("listNotifications", "GET " + notifications);
+		canonical.put("markNotificationRead", "POST " + notifications + "/{id}/read");
+		canonical.put("retryNotificationDelivery", "POST " + notifications + "/deliveries/{id}/retry");
 		canonical.forEach((operationId, route) -> {
 			List<String> found = routes.getOrDefault(operationId, List.of());
 			if (!found.equals(List.of(route))) {

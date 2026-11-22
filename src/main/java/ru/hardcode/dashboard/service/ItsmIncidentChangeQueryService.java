@@ -84,18 +84,25 @@ public class ItsmIncidentChangeQueryService implements ItsmIncidentChangeReader 
 			var publication = dashboards.publication();
 			throw new DashboardIncidentNotFoundException(incidentId, publication.eventSeq(), publication.revision());
 		}
-		return new IncidentHistoryResponse(incidentId,
-				events.isEmpty() ? null : events.getLast().observedAt(), events);
+		var lastObservedAt = events.reversed().stream().filter(event -> event.details() == null)
+				.findFirst().map(IncidentChangeEvent::observedAt).orElse(null);
+		return new IncidentHistoryResponse(incidentId, lastObservedAt, events);
 	}
 
 	private IncidentChangeEvent event(JournalRow row) {
+		Map<String, Object> details = row.details() == null ? null : readDocument(row.details());
+		var fields = details == null ? changedFields(row) : List.<IncidentChangeField>of();
+		return new IncidentChangeEvent(row.eventSeq(), row.sourceId(), row.incidentId(), row.sourceVersion(),
+				row.changeRevision(), row.changeKind(), row.observedAt(), row.sourceTime(), fields,
+					details == null ? null : "local-" + row.eventSeq(), details);
+	}
+
+	private List<IncidentChangeField> changedFields(JournalRow row) {
 		Map<String, Object> before = readDocument(row.beforeData());
 		Map<String, Object> after = readDocument(row.afterData());
-		var fields = TRACKED_FIELDS.stream()
+		return TRACKED_FIELDS.stream()
 				.map(field -> new IncidentChangeField(field, before.get(field), after.get(field)))
 				.toList();
-		return new IncidentChangeEvent(row.eventSeq(), row.sourceId(), row.incidentId(), row.sourceVersion(),
-				row.changeRevision(), row.changeKind(), row.observedAt(), row.sourceTime(), fields);
 	}
 
 	private Map<String, Object> readDocument(String json) {

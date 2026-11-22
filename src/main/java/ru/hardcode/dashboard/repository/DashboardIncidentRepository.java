@@ -15,6 +15,8 @@ import ru.hardcode.dashboard.entity.ItsmIncidentState;
 @Repository
 public class DashboardIncidentRepository {
 
+	private static final String MEETING_LINK_KEY = "MTS Link";
+
 	private static final String INCIDENTS_FROM = """
 			FROM itsm_incident AS incident
 			JOIN itsm_snapshot_source AS source ON source.source_id = incident.source_id
@@ -71,6 +73,8 @@ public class DashboardIncidentRepository {
 				SELECT incident.id, product.product_key, team.group_name, incident.state, incident.priority_id,
 				       incident.submit_date, incident.deadline, incident.completion_date,
 				       incident.source_data->>'updatedAt' AS source_updated_at,
+				       incident.source_data->>'header' AS header,
+				       incident.source_data->>'serviceType' AS service_type,
 				       batch.processed_at AS changed_at,
 				       greatest(incident.submit_date, incident.last_assignment_to_team_at,
 				                incident.completion_date) AS latest_source_date,
@@ -90,8 +94,22 @@ public class DashboardIncidentRepository {
 				WHERE incident.present_in_source AND incident.id ~ '^INC[0-9]{6,18}$'
 				""")
 				.query((rs, row) -> new IncidentRow(summary(rs), rs.getString("source_updated_at"),
-						instant(rs, "changed_at"), instant(rs, "latest_source_date"),
-						rs.getString("assigned_employee"))).list();
+						rs.getString("header"), rs.getString("service_type"), instant(rs, "changed_at"),
+						instant(rs, "latest_source_date"), rs.getString("assigned_employee"))).list();
+	}
+
+	public boolean saveMeetingLink(String incidentId, String url) {
+		return jdbc.sql("""
+				UPDATE itsm_incident AS incident
+				SET links_data = jsonb_set(incident.links_data, ARRAY[CAST(:key AS text)], to_jsonb(CAST(:url AS text)))
+				WHERE incident.id = :id AND incident.present_in_source AND incident.last_seen_version IS NOT NULL
+				""").param("id", incidentId).param("key", MEETING_LINK_KEY).param("url", url).update() == 1;
+	}
+
+	public boolean isPublished(String incidentId) {
+		return jdbc.sql("SELECT EXISTS (SELECT 1 " + INCIDENTS_FROM
+				+ "WHERE incident.present_in_source AND incident.id = :id)")
+				.param("id", incidentId).query(Boolean.class).single();
 	}
 
 	public Optional<CardRow> findCard(String incidentId) {
@@ -101,7 +119,7 @@ public class DashboardIncidentRepository {
 				       incident.last_assignment_to_team_at, incident.solution, service.service_key,
 				       attributes.header, attributes.description, attributes.product_master_id,
 				       attributes.service_type, attributes.assigned_employee, attributes.assigned_employee_login,
-				       attributes.state_reason
+				       attributes.state_reason, incident.links_data ->> CAST(:key AS text) AS meeting_url
 				""" + INCIDENTS_FROM + """
 				LEFT JOIN itsm_catalog_service AS service ON service.id = incident.service_id
 				CROSS JOIN LATERAL (
@@ -118,12 +136,12 @@ public class DashboardIncidentRepository {
 				                             'assignedEmployee', 'assignedEmployeeLogin', 'stateReason')
 				) AS attributes
 				WHERE incident.present_in_source AND incident.id = :id
-				""").param("id", incidentId)
+				""").param("id", incidentId).param("key", MEETING_LINK_KEY)
 				.query((rs, row) -> new CardRow(summary(rs), rs.getString("header"), rs.getString("description"),
 						rs.getString("product_master_id"), rs.getString("service_key"), rs.getString("service_type"),
 						rs.getString("assigned_employee"), rs.getString("assigned_employee_login"),
 						rs.getString("state_reason"),
-						instant(rs, "last_assignment_to_team_at"), rs.getString("solution")))
+						instant(rs, "last_assignment_to_team_at"), rs.getString("solution"), rs.getString("meeting_url")))
 				.optional();
 	}
 
@@ -223,13 +241,13 @@ public class DashboardIncidentRepository {
 			int priorityId, Instant submitDate, Instant deadline, Instant completionDate) {
 	}
 
-	public record IncidentRow(IncidentSummary summary, String sourceUpdatedAt, Instant changedAt,
-			Instant latestSourceDate, String assignedEmployee) {
+	public record IncidentRow(IncidentSummary summary, String sourceUpdatedAt, String header, String serviceType,
+			Instant changedAt, Instant latestSourceDate, String assignedEmployee) {
 	}
 
 	public record CardRow(IncidentSummary summary, String header, String description, String productMasterId,
 			String service, String serviceType, String assignedEmployee, String assignedEmployeeLogin,
-			String stateReason, Instant lastAssignmentToTeamDateTime, String solution) {
+			String stateReason, Instant lastAssignmentToTeamDateTime, String solution, String meetingUrl) {
 	}
 
 	/** One published incident with the fields the similar-incident scoring compares (KAN-42). */
