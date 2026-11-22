@@ -71,6 +71,10 @@ jobs:
       - name: Deploy and wait for healthcheck
         run: docker compose --env-file "$BACKEND_ENV_FILE" up -d --no-build --wait --wait-timeout 300 backend keycloak
 
+      - name: Reconcile Keycloak browser client
+        run: |
+          python3 scripts/reconcile-keycloak-web-client.py
+
       - name: Verify database sample
         run: |
           count=$(docker compose --env-file "$BACKEND_ENV_FILE" exec -T postgres psql -U dashboard -d dashboard -Atc 'SELECT count(*) FROM deployment_sample')

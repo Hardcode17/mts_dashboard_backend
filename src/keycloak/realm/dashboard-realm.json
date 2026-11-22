@@ -125,7 +125,7 @@
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://localhost:3000/* __DASHBOARD_WEB_ORIGIN__/*"
+        "post.logout.redirect.uris": "+"
       },
       "protocolMappers": [
         {
