@@ -20,7 +20,10 @@ for tool in curl openssl python3; do
   command -v "$tool" > /dev/null || { echo "Missing $tool" >&2; exit 1; }
 done
 
-BASE="$KEYCLOAK_PUBLIC_URL/realms/$REALM/protocol/openid-connect"
+# On the Pi the public hostname can lead outside the runner. Its loopback frontend
+# proxies the same Keycloak realm and advertises the same public issuer.
+transport="${KEYCLOAK_LOOPBACK_URL:-${KEYCLOAK_PUBLIC_URL}}"
+BASE="$transport/realms/$REALM/protocol/openid-connect"
 # Keycloak ties the login page to its session cookie (AUTH_SESSION_ID), so the cookie written by
 # the GET below must be posted back with the form.
 PUBLIC_HOST=${KEYCLOAK_PUBLIC_URL#*://}
@@ -39,6 +42,10 @@ AUTH_URL="$BASE/auth?response_type=code&client_id=$CLIENT_ID&redirect_uri=$REDIR
 LOGIN_URL=$(curl -sS -c "$COOKIES" "$AUTH_URL" \
   | python3 -c 'import html, re, sys; m = re.search(r"action=\"([^\"]+)\"", sys.stdin.read()); print(html.unescape(m.group(1)))')
 test -n "$LOGIN_URL" || { echo "Keycloak did not return a login form" >&2; exit 1; }
+case "$LOGIN_URL" in
+  "$KEYCLOAK_PUBLIC_URL/realms/$REALM/login-actions/"*) LOGIN_URL="$transport${LOGIN_URL#"$KEYCLOAK_PUBLIC_URL"}" ;;
+  *) echo "Unexpected realm in Keycloak login form" >&2; exit 1 ;;
+esac
 
 LOCATION=$(curl -sS -b "$COOKIES" -c "$COOKIES" -o /dev/null -D - -X POST "$LOGIN_URL" \
   --data-urlencode "username=$DASHBOARD_TEST_USERNAME" \
@@ -47,7 +54,7 @@ LOCATION=$(curl -sS -b "$COOKIES" -c "$COOKIES" -o /dev/null -D - -X POST "$LOGI
   | tr -d '\r' | sed -n 's/^[Ll]ocation: //p')
 case "$LOCATION" in
   "$REDIRECT_URI"*) ;;
-  *) echo "Login failed (unknown user, wrong password or self-registration disabled): $LOCATION" >&2; exit 1 ;;
+  *) echo "Keycloak did not redirect to the registered callback after sign-in" >&2; exit 1 ;;
 esac
 
 CODE=$(python3 -c 'import sys, urllib.parse as u; print(u.parse_qs(u.urlparse(sys.argv[1]).query).get("code", [""])[0])' "$LOCATION")
