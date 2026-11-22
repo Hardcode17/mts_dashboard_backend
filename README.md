@@ -111,6 +111,12 @@ CORS-origins браузерного SPA задаются `APP_CORS_ALLOWED_ORIGI
 
 ## Стендовый Keycloak в продакшен-деплое
 
+Workflow **Deploy backend** разворачивает весь стенд из этого `compose.yaml`:
+PostgreSQL, Keycloak, Spring, фронтенд и, при включении, ITSM-мок. Для релиза
+после изменений только во фронтенде или данных запустите **Deploy backend**
+вручную на ветке `main`. Workflow фронтенда проверяет сборку и не запускает
+отдельный Compose-проект.
+
 `compose.yaml` бэкенда поднимает Keycloak на `127.0.0.1:8084` на Raspberry Pi.
 Перед стартом сервис `keycloak-volume-init` назначает владельца каталога тома
 H2. Он сохраняет существующий realm и его пользователей.
@@ -123,12 +129,24 @@ Settings → Secrets and variables → Actions → Variables:
   (например `https://raspberrypi.tail029aee.ts.net/keycloak`);
 - `STAND_FRONTEND_URL` — опубликованный origin фронтенда
   (например `https://raspberrypi.tail029aee.ts.net`).
+- `FRONTEND_PORT` и `BACKEND_PORT` — порты на хосте (по умолчанию `8080` и `8081`).
+- `STAND_FRONTEND_REF` и `STAND_DATA_REF` — ветка, тег или SHA соответствующего
+  репозитория. По умолчанию оба checkout используют `main`.
+- `STAND_ENABLE_ITSM_MOCK=true` подключает `character_problems.json` из
+  `Hardcode17/mts_dashboard_data`. При запуске отправитель добавляет недостающие
+  инциденты, сохраняя существующие правки и последовательность снимков.
+- Для настройки Ollama используйте `MCC_GROUP_MODEL` и `MCC_OLLAMA_URL` в
+  Variables бэкенда. Адрес Ollama должен быть доступен из контейнера.
+
+OIDC authority вычисляется из `STAND_KEYCLOAK_URL`. Фронтенд обращается к
+API по `http://backend:8080` внутри Compose. Хранилище рабочего пространства
+фронтенда переиспользует прежний том `mts-dashboard-front_workspace-data`.
 
 `scripts/prepare-runtime.sh` рендерит realm через `scripts/render-realm.py`: пользователь
 `coordinator` с паролем из `STAND_COORDINATOR_PASSWORD` runtime-файла, redirect URI
 публичного фронтенда и сгенерированный секрет `itsm-sender`. Issuer
-`STAND_KEYCLOAK_URL/realms/dashboard` попадает в `APP_AUTH_HUMAN_ISSUER` бэкенда и
-должен быть значением `FRONTEND_OIDC_AUTHORITY` в репозитории фронтенда. Origin фронтенда
+`STAND_KEYCLOAK_URL/realms/dashboard` используется и фронтендом, и в
+`APP_AUTH_HUMAN_ISSUER` бэкенда. Origin фронтенда
 из `STAND_FRONTEND_URL` попадает в `APP_CORS_ALLOWED_ORIGINS` (KAN-64), так что браузерный
 SPA получает CORS на `/api/**`; машинный приём `/api/integrations/itsm/**` CORS не получает.
 Схема подключения — [docs/spa-access.md](docs/spa-access.md).
@@ -152,22 +170,16 @@ web origin и post-logout redirect URI клиента `dashboard-web` в Keycloa
 После запуска backend и Keycloak workflow собирает и запускает только
 `itsm-mock` без повторного запуска зависимостей. Деплой демостенда считается
 успешным, когда локальный `/api/mock/status` отвечает и PostgreSQL подтверждает
-два **новых** пакета `SUCCEEDED`, принятых после начала запуска отправителя.
+два **новых** пакета `SUCCEEDED`, принятых после начала запуска отправителя,
+и наличие всех инцидентов из выгрузки.
 Контейнер отправителя слушает только loopback; его управляющий API наружу
 не публикуется. При включённом mock скрипт подготовки задаёт ссылку на
 `/itsm_incident/{incidentId}/page` на домене фронтенда. Шлюз фронтенда
 должен отдавать по этому пути HTML-карточку из mock. Если в runtime-файле
 уже есть `DASHBOARD_ITSM_LINK_TEMPLATE`, скрипт сохраняет его.
 
-Для отката выставьте `STAND_ENABLE_ITSM_MOCK=false` и остановите только
-отправителя на том же Compose-проекте:
-
-```sh
-docker compose --env-file "$BACKEND_ENV_FILE" --profile itsm-mock stop itsm-mock
-```
-
-Не используйте `down -v`: тома PostgreSQL, Keycloak и состояние отправителя
-должны сохраниться.
+Чтобы отключить отправителя, выставьте `STAND_ENABLE_ITSM_MOCK=false` и
+запустите **Deploy backend**. Workflow остановит контейнер, сохранив его том.
 
 Если на существующей базе Flyway сообщает, что V9 отсутствует при уже
 установленной V10, сделайте резервную копию PostgreSQL. Затем один раз

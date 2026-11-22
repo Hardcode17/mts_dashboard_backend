@@ -1,5 +1,7 @@
 package ru.hardcode.dashboard.service;
 
+import java.net.URI;
+import java.net.URISyntaxException;
 import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
@@ -12,6 +14,7 @@ import java.util.Comparator;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.regex.Pattern;
@@ -33,6 +36,7 @@ import ru.hardcode.dashboard.exception.AppException;
 import ru.hardcode.dashboard.exception.DashboardIncidentNotFoundException;
 import ru.hardcode.dashboard.repository.DashboardIncidentRepository;
 import ru.hardcode.dashboard.repository.DashboardIncidentRepository.IncidentRow;
+import ru.hardcode.dashboard.repository.IncidentLinkRepository;
 import ru.hardcode.dashboard.repository.ItsmBaselineRepository;
 import ru.hardcode.dashboard.service.deadlinerisk.DeadlineRiskService;
 import tools.jackson.core.type.TypeReference;
@@ -44,8 +48,18 @@ public class DashboardIncidentService {
 
 	private static final Pattern INCIDENT_ID = Pattern.compile("INC[0-9]{6,18}");
 	private static final TypeReference<Map<String, Object>> ROW = new TypeReference<>() {};
+	private static final Duration NEAR_DEADLINE = Duration.ofMinutes(20);
 	private static final Comparator<IncidentRow> INCIDENT_ORDER =
 			Comparator.comparing(DashboardIncidentService::updatedAt).reversed()
+					.thenComparing(row -> row.summary().id());
+	private static final Comparator<IncidentRow> REGISTERED_ORDER =
+			Comparator.comparing((IncidentRow row) -> row.summary().submitDate()).reversed()
+					.thenComparing(row -> row.summary().id());
+	private static final Comparator<IncidentRow> DEADLINE_ORDER =
+			Comparator.comparing(DashboardIncidentService::activePriorityFirst, Comparator.reverseOrder())
+					.thenComparing(row -> row.summary().priorityId(), Comparator.reverseOrder())
+					.thenComparing(DashboardIncidentService::deadlineOrMax)
+					.thenComparing(row -> row.summary().submitDate())
 					.thenComparing(row -> row.summary().id());
 
 	private final DashboardIncidentRepository repository;
@@ -58,10 +72,13 @@ public class DashboardIncidentService {
 	private final ItsmIncidentSnapshotParser parser;
 	private final ItsmSnapshotMapper mapper;
 	private final DeadlineRiskService deadlineRisk;
+	private final PostmortemDraftService postmortems;
+	private final IncidentLinkRepository incidentLinks;
 
 	public DashboardIncidentService(DashboardIncidentRepository repository, DashboardItsmLink itsmLink, Clock clock,
 			JdbcTemplate db, ObjectMapper json, ItsmApiClient itsm, ItsmBaselineRepository domain,
-			ItsmIncidentSnapshotParser parser, ItsmSnapshotMapper mapper, DeadlineRiskService deadlineRisk) {
+			ItsmIncidentSnapshotParser parser, ItsmSnapshotMapper mapper, DeadlineRiskService deadlineRisk,
+			PostmortemDraftService postmortems, IncidentLinkRepository incidentLinks) {
 		this.repository = repository;
 		this.itsmLink = itsmLink;
 		this.clock = clock;
@@ -72,13 +89,13 @@ public class DashboardIncidentService {
 		this.parser = parser;
 		this.mapper = mapper;
 		this.deadlineRisk = deadlineRisk;
+		this.postmortems = postmortems;
+		this.incidentLinks = incidentLinks;
 	}
 
 	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 	public DashboardIncidentCardResponse card(String incidentId) {
-		if (!INCIDENT_ID.matcher(incidentId).matches()) {
-			throw new AppException(AppErrors.INVALID_INCIDENT_ID);
-		}
+		validateIncidentId(incidentId);
 		var published = repository.publication();
 		if (published.eventSeq() == 0) {
 			throw new DashboardIncidentNotFoundException(incidentId, 0, 0);
@@ -94,9 +111,34 @@ public class DashboardIncidentService {
 				incident.priorityId(), incident.submitDate(),
 				card.lastAssignmentToTeamDateTime(), incident.deadline(), incident.completionDate(), card.solution(),
 				remaining == null ? null : remaining.getSeconds(), remaining != null && remaining.isNegative(),
-				itsmLink.forIncident(incident.id()), itsmLink.demo(), DashboardIncidentGroup.memberships(incident),
-				deadlineRisk.cardRisk(incident, clock.instant()), published.eventSeq(), published.revision());
+				itsmLink.forIncident(incident.id()), itsmLink.demo(), card.meetingUrl(),
+				DashboardIncidentGroup.memberships(incident),
+				deadlineRisk.cardRisk(incident, clock.instant()), incidentLinks.findForIncident(incidentId),
+				published.eventSeq(), published.revision());
 	}
+
+	@Transactional
+	public void saveMeetingLink(String incidentId, String meetingUrl) {
+		validateIncidentId(incidentId);
+		validateMeetingUrl(meetingUrl);
+		if (!repository.saveMeetingLink(incidentId, meetingUrl)) {
+			var publication = repository.publication();
+			throw new DashboardIncidentNotFoundException(incidentId, publication.eventSeq(), publication.revision());
+		}
+	}
+
+	private static void validateMeetingUrl(String value) {
+		try {
+			URI uri = new URI(value);
+			if (!("https".equals(uri.getScheme()) || "http".equals(uri.getScheme()))
+					|| uri.getHost() == null || uri.getRawUserInfo() != null || uri.getPort() > 65535) {
+				throw new AppException(AppErrors.INVALID_MEETING_LINK);
+			}
+		} catch (URISyntaxException exception) {
+			throw new AppException(AppErrors.INVALID_MEETING_LINK, exception);
+		}
+	}
+
 
 	/**
 	 * The published source record of an incident with the publication counters, read through the
@@ -105,10 +147,14 @@ public class DashboardIncidentService {
 	private record PublishedRow(Map<String, Object> row, String source) {
 	}
 
-	private PublishedRow publishedRow(String incidentId) {
-		if (!INCIDENT_ID.matcher(incidentId).matches()) {
+	static void validateIncidentId(String incidentId) {
+		if (incidentId == null || !INCIDENT_ID.matcher(incidentId).matches()) {
 			throw new AppException(AppErrors.INVALID_INCIDENT_ID);
 		}
+	}
+
+	private PublishedRow publishedRow(String incidentId) {
+		validateIncidentId(incidentId);
 		var publication = repository.publication();
 		return db.query("""
 				SELECT i.source_data, i.source_id FROM itsm_incident i
@@ -202,6 +248,7 @@ public class DashboardIncidentService {
 			db.update("UPDATE itsm_snapshot_source SET change_revision=? WHERE source_id=?", revision, before.source());
 			db.update("UPDATE dashboard_publication SET revision=?,event_seq=event_seq+1 WHERE singleton",
 					revision);
+			postmortems.capture(revision);
 		}
 		return card(incidentId);
 	}
@@ -254,12 +301,19 @@ public class DashboardIncidentService {
 
 	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 	public ListPage list(List<String> groups, boolean includeCompleted, String cursor, int limit) {
+		return list(groups, includeCompleted, IncidentListFilter.defaults(), cursor, limit);
+	}
+
+	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+	public ListPage list(List<String> groups, boolean includeCompleted, IncidentListFilter filter,
+			String cursor, int limit) {
 		if (limit < 1 || limit > 100) {
 			throw new AppException(AppErrors.INVALID_LIMIT);
 		}
-		var selection = selection(groups, includeCompleted);
+		var selection = selection(groups, includeCompleted, filter);
 		var publication = repository.publication();
-		String variant = publication.eventSeq() + "-" + selection.key() + "-" + limit;
+		var selected = publication.eventSeq() == 0 ? List.<Summary>of() : selectItems(selection);
+		String variant = publication.eventSeq() + "-" + selection.key(selected) + "-" + limit;
 		int offset = cursor == null ? 0 : decodeOffset(cursor, variant, limit);
 		if (publication.eventSeq() == 0) {
 			if (cursor != null) {
@@ -269,7 +323,6 @@ public class DashboardIncidentService {
 					variant + "-0");
 		}
 
-		var selected = selectItems(selection);
 		if (cursor != null && offset >= selected.size()) {
 			throw new AppException(AppErrors.INVALID_CURSOR);
 		}
@@ -286,19 +339,27 @@ public class DashboardIncidentService {
 
 	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
 	public ListPage export(List<String> groups, boolean includeCompleted) {
-		var selection = selection(groups, includeCompleted);
+		return export(groups, includeCompleted, IncidentListFilter.defaults());
+	}
+
+	@Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+	public ListPage export(List<String> groups, boolean includeCompleted, IncidentListFilter filter) {
+		var selection = selection(groups, includeCompleted, filter);
 		var publication = repository.publication();
 		boolean empty = publication.eventSeq() == 0;
+		var selected = empty ? List.<Summary>of() : selectItems(selection);
 		var body = new DashboardIncidentListResponse(publication.eventSeq(), publication.revision(), empty,
-				List.of(), empty ? List.of() : selectItems(selection), null);
-		return new ListPage(body, publication.eventSeq() + "-" + selection.key() + "-csv");
+				List.of(), selected, null);
+		return new ListPage(body, publication.eventSeq() + "-" + selection.key(selected) + "-csv");
 	}
 
 	private List<Summary> selectItems(Selection selection) {
+		Instant now = clock.instant();
 		return repository.list().stream()
 				.filter(row -> selection.includeCompleted() || !row.summary().state().isCompleted()
 						|| row.summary().state() == ItsmIncidentState.Research)
-				.sorted(INCIDENT_ORDER)
+				.filter(row -> matchesFilter(row, selection.filter(), now))
+				.sorted(order(selection.filter().sort()))
 				.map(DashboardIncidentService::toSummary)
 				.filter(item -> selection.groups().isEmpty() || selection.groups().stream().anyMatch(g -> g.contains(item)))
 				.toList();
@@ -321,10 +382,89 @@ public class DashboardIncidentService {
 		return row.changedAt() != null ? row.changedAt() : row.latestSourceDate();
 	}
 
-	private static Selection selection(List<String> groups, boolean includeCompleted) {
+	private static Selection selection(List<String> groups, boolean includeCompleted, IncidentListFilter filter) {
 		var selected = EnumSet.noneOf(DashboardIncidentGroup.class);
 		groups.forEach(key -> selected.add(DashboardIncidentGroup.fromKey(key)));
-		return new Selection(selected, includeCompleted);
+		return new Selection(selected, includeCompleted, filter);
+	}
+
+	private static boolean matchesFilter(IncidentRow row, IncidentListFilter filter, Instant now) {
+		if (filter.query() != null && !matchesQuery(row, filter.query())) {
+			return false;
+		}
+		if (filter.priority() != null && row.summary().priorityId() != filter.priority()) {
+			return false;
+		}
+		if (filter.product() != null && !filter.product().equals(row.summary().productName())) {
+			return false;
+		}
+		if (filter.team() != null && !filter.team().equals(row.summary().assignedGroupName())) {
+			return false;
+		}
+		if (filter.state() != null && row.summary().state() != filter.state()) {
+			return false;
+		}
+		if (filter.serviceType() != null && !filter.serviceType().equals(row.serviceType())) {
+			return false;
+		}
+		return matchesDeadline(row, filter.deadline(), now);
+	}
+
+	private static boolean matchesQuery(IncidentRow row, String query) {
+		String normalized = query.trim().toLowerCase(Locale.ROOT);
+		if (INCIDENT_ID.matcher(query.toUpperCase(Locale.ROOT)).matches()) {
+			return row.summary().id().equalsIgnoreCase(query);
+		}
+		String haystack = String.join(" ",
+				text(row.summary().id()),
+				text(row.summary().productName()),
+				text(row.header()),
+				text(row.summary().assignedGroupName())
+		).toLowerCase(Locale.ROOT);
+		for (String word : normalized.split("\\s+")) {
+			if (!haystack.contains(word)) {
+				return false;
+			}
+		}
+		return true;
+	}
+
+	private static boolean matchesDeadline(IncidentRow row, IncidentListFilter.DeadlineState deadline, Instant now) {
+		if (deadline == null) {
+			return true;
+		}
+		Instant due = row.summary().deadline();
+		if (deadline == IncidentListFilter.DeadlineState.NONE) {
+			return due == null;
+		}
+		if (due == null || row.summary().state().isCompleted()) {
+			return false;
+		}
+		if (deadline == IncidentListFilter.DeadlineState.LATE) {
+			return due.isBefore(now);
+		}
+		return !due.isBefore(now) && Duration.between(now, due).compareTo(NEAR_DEADLINE) <= 0;
+	}
+
+	private static Comparator<IncidentRow> order(IncidentListFilter.Sort sort) {
+		return switch (sort) {
+			case UPDATED -> INCIDENT_ORDER;
+			case REGISTERED -> REGISTERED_ORDER;
+			case DEADLINE -> DEADLINE_ORDER;
+		};
+	}
+
+	private static boolean activePriorityFirst(IncidentRow row) {
+		return !row.summary().state().isCompleted() && row.summary().priorityId() == 4;
+	}
+
+	private static Instant deadlineOrMax(IncidentRow row) {
+		Instant deadline = row.summary().deadline();
+		return deadline == null ? Instant.MAX : deadline;
+	}
+
+	private static String text(String value) {
+		return value == null ? "" : value;
 	}
 
 	private static String encodeOffset(String variant, int offset) {
@@ -351,14 +491,15 @@ public class DashboardIncidentService {
 		throw new AppException(AppErrors.INVALID_CURSOR);
 	}
 
-	private record Selection(EnumSet<DashboardIncidentGroup> groups, boolean includeCompleted) {
+	private record Selection(EnumSet<DashboardIncidentGroup> groups, boolean includeCompleted,
+			IncidentListFilter filter) {
 		boolean includes(DashboardIncidentGroup group) {
 			return groups.isEmpty() || groups.contains(group);
 		}
 
-		String key() {
+		String key(List<Summary> selected) {
 			int mask = groups.stream().mapToInt(group -> 1 << group.ordinal()).sum();
-			return mask + "-" + (includeCompleted ? 1 : 0);
+			return mask + "-" + (includeCompleted ? 1 : 0) + filter.key(selected);
 		}
 	}
 

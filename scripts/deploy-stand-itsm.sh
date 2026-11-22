@@ -58,6 +58,24 @@ WHERE incident.source_id = :'source'
 SQL
       )"
       printf 'Backend calculated numeric regression scores for %s stand incidents.\n' "$scored"
+      if [[ -n "${STAND_FIXTURE_DIR:-}" ]]; then
+        fixture_ids=$(python3 -c 'import json,sys; print(json.dumps([row["id"] for row in json.load(sys.stdin)]))' \
+          < "$STAND_FIXTURE_DIR/character_problems.json")
+        missing=$("${db[@]}" -v source="$source" -v fixture_ids="$fixture_ids" <<'SQL'
+SELECT count(*)
+FROM jsonb_array_elements_text(:'fixture_ids'::jsonb) AS fixture(id)
+WHERE NOT EXISTS (
+    SELECT 1 FROM itsm_incident AS incident
+    WHERE incident.source_id = :'source' AND incident.id = fixture.id
+);
+SQL
+        )
+        if [[ "$missing" != 0 ]]; then
+          printf 'Backend is missing %s fixture incidents after ITSM delivery.\n' "$missing" >&2
+          exit 1
+        fi
+        echo 'All fixture incidents are present in the backend database.'
+      fi
       exit 0
     fi
   fi

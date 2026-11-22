@@ -12,7 +12,8 @@ public record DashboardIncidentCardResponse(
 		String service, String serviceType, String assignedGroupName, String assignedEmployeeLogin,
 		String assignedEmployee, ItsmIncidentState stateEnum, String stateReason, int priorityId, Instant submitDate,
 		Instant lastAssignmentToTeamDateTime, Instant deadline, Instant completionDate, String solution,
-		Long remainingSeconds, boolean overdue, URI itsmUrl, boolean itsmDemo,
-		List<Membership> groupMemberships, DeadlineRiskResponse deadlineRisk, long eventSeq, long revision
+		Long remainingSeconds, boolean overdue, URI itsmUrl, boolean itsmDemo, String meetingUrl,
+		List<Membership> groupMemberships, DeadlineRiskResponse deadlineRisk,
+		List<ConfirmedIncidentLinkResponse> confirmedLinks, long eventSeq, long revision
 ) {
 }

@@ -46,5 +46,7 @@
     "score": 4.0
   },
   "eventSeq": 43,
-  "revision": 42
+  "revision": 42,
+  "meetingUrl": null,
+  "confirmedLinks": []
 }

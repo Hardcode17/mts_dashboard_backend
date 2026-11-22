@@ -93,6 +93,7 @@ class DashboardMonitoringServiceTest {
 	private static IncidentRow row(String id, ItsmIncidentState state, int priority, String group,
 			String assignedEmployee) {
 		return new IncidentRow(new IncidentSummary(id, "Test product", group, state, priority,
-				Instant.parse("2026-11-15T09:00:00Z"), null, null), null, null, null, assignedEmployee);
+				Instant.parse("2026-11-15T09:00:00Z"), null, null), null, null, null, null, null,
+				assignedEmployee);
 	}
 }
