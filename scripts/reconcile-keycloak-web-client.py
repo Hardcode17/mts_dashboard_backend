@@ -29,13 +29,15 @@ def env_file_values(path: str) -> dict[str, str]:
 
 
 def request(url: str, method: str = "GET", body: bytes | None = None,
-            headers: dict[str, str] | None = None) -> Any:
+            headers: dict[str, str] | None = None, *, allow_no_content: bool = False) -> Any:
     request_obj = urllib.request.Request(url, data=body, method=method,
                                          headers=headers or {})
     last_error: Exception | None = None
     for attempt in range(10):
         try:
             with urllib.request.urlopen(request_obj, timeout=15) as response:
+                if allow_no_content and response.status == 204:
+                    return None
                 raw = response.read()
                 if not raw.strip():
                     raise RuntimeError(f"Keycloak returned an empty response from {url}")
@@ -109,6 +111,7 @@ def main() -> None:
         method="PUT",
         body=json.dumps(client).encode(),
         headers=auth,
+        allow_no_content=True,
     )
     print(f"Reconciled dashboard-web Keycloak client for {frontend}")
 
