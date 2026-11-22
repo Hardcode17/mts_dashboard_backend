@@ -66,6 +66,9 @@ fi
 if ! grep -q '^STAND_COORDINATOR_PASSWORD=' "$BACKEND_ENV_FILE"; then
   printf 'STAND_COORDINATOR_PASSWORD=%s\n' "$(openssl rand -hex 32)" >> "$BACKEND_ENV_FILE"
 fi
+if [[ "${STAND_ENABLE_ITSM_MOCK:-false}" == true ]] && ! grep -q '^STAND_HANDOVER_COORDINATOR_PASSWORD=' "$BACKEND_ENV_FILE"; then
+  printf 'STAND_HANDOVER_COORDINATOR_PASSWORD=%s\n' "$(openssl rand -hex 32)" >> "$BACKEND_ENV_FILE"
+fi
 if ! grep -q '^STAND_ITSM_SENDER_SECRET=' "$BACKEND_ENV_FILE"; then
   printf 'STAND_ITSM_SENDER_SECRET=%s\n' "$(openssl rand -hex 32)" >> "$BACKEND_ENV_FILE"
 fi
