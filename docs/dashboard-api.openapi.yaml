@@ -21,6 +21,7 @@ info:
     | Карточка | `GET /api/dashboard/incidents/{incidentId}` | `incidentId` — строковый INC, URL-кодируется |
     | Мониторинг | `GET /api/dashboard/monitoring/summary` | текущие счётчики + только фактические публикации за 24 ч |
     | Связи карточки | `GET /api/incidents/{id}/relationships` | `id` — строковый INC фокуса; глубина один шаг |
+    | Заметки | `GET /api/dashboard/incidents/{incidentId}/notes` | хронология заметок одного INC по `eventSeq` (KAN-43) |
     | Статус источника | `GET /api/dashboard/sources` | все источники, включая stale |
     | Polling | `GET /api/dashboard/events?sinceEventSeq=` | события с `eventSeq > sinceEventSeq` |
     | Подтверждение | `POST /api/dashboard/events/ack` | точный набор `eventId`, без `since` и «до» |
@@ -80,6 +81,20 @@ info:
     no-op без новой отправки, одновременные повторы одной доставки дают одну новую попытку.
     Причина ошибки — короткий код (`channel_rejected_503` и т.п.), без адресов, токенов и URL.
     Состояние сохраняется в БД и переживает рестарт backend.
+
+    ## Заметки смены (KAN-43)
+
+    `POST /api/dashboard/incidents/{incidentId}/notes` сохраняет заметку координатора об INC.
+    Автор берётся из проверенного токена (локальный допуск KAN-22); поле `authorId` в теле —
+    необязательное эхо, при несовпадении с автором токена запись отвергается целиком
+    (`403 INCIDENT_NOTE_AUTHOR_MISMATCH`), без записи и без продвижения `eventSeq`. Пустой
+    текст — `400 INCIDENT_NOTE_TEXT_INVALID`, неизвестный INC — `404 INCIDENT_NOT_FOUND`.
+    Событие заметки вида `NOTE_ADDED` видно в `/api/dashboard/incidents/changes` и `/history` с тем же `eventSeq`.
+    Событие заметки получает собственный `eventSeq` из общей последовательности хронологии
+    KAN-28 и не меняет опубликованный `revision` снимка ITSM. `GET` того же маршрута возвращает
+    историю заметок INC страницами по `eventSeq` (`afterEventSeq` + `limit`), поэтому смена
+    видит все заметки с авторами и временами наблюдения, а параллельные заметки с одной
+    отметкой времени получают разные `eventSeq` в одном ответе.
 
     ## Источник и свежесть
 
@@ -3046,6 +3061,205 @@ paths:
                   summary: Нет допуска координатора.
                   value: {code: COORDINATOR_ACCESS_DENIED, message: Coordinator access is not granted}
 
+  '/api/dashboard/incidents/{incidentId}/notes':
+    post:
+      operationId: addIncidentNote
+      security: [{coordinatorBearer: []}]
+      summary: Сохранить заметку смены в хронологии INC (KAN-43)
+      description: |
+        Координатор добавляет заметку к INC. Автор — локальная идентичность проверенного
+        токена; необязательное `authorId` в теле должно совпадать с ней, чужой автор —
+        `403 INCIDENT_NOTE_AUTHOR_MISMATCH` без записи и без продвижения `eventSeq`.
+        `observedAt` — время наблюдения, по умолчанию текущее время сервера. Событие заметки
+        получает собственный `eventSeq` из общей последовательности хронологии KAN-28;
+        опубликованный `revision` снимка ITSM не меняется.
+      parameters:
+        - {name: incidentId, in: path, required: true, schema: {$ref: '#/components/schemas/IncidentId'}}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateIncidentNoteRequest'
+            examples:
+              shiftObservation:
+                summary: Заметка со временем наблюдения и эхом автора
+                value:
+                  text: 'Связка восстановлена, деградация не подтверждена'
+                  observedAt: '2026-11-21T09:15:00Z'
+                  authorId: 7
+              defaultTime:
+                summary: Заметка со временем наблюдения по умолчанию
+                value:
+                  text: 'Передано смене: следить за очередью платежей'
+      responses:
+        '201':
+          description: 'Заметка сохранена; `eventSeq` — позиция события в общей хронологии.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentNote'
+              examples:
+                savedNote:
+                  summary: Сохранённая заметка с автором из токена
+                  value:
+                    noteId: 3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11
+                    incidentId: INC000021095532
+                    authorId: 7
+                    authorLogin: operator
+                    authorDisplayName: 'Dashboard Operator'
+                    observedAt: '2026-11-21T09:15:00Z'
+                    eventSeq: 44
+                    text: 'Связка восстановлена, деградация не подтверждена'
+        '400':
+          description: Некорректный текст или идентификатор INC.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                emptyText:
+                  summary: Пустой текст заметки
+                  value: {"code": "INCIDENT_NOTE_TEXT_INVALID", "message": "Note text must contain 1-4000 non-whitespace characters"}
+                invalidIncidentId:
+                  summary: Идентификатор не вида INC
+                  value: {"code": "INVALID_INCIDENT_ID", "message": "incidentId must be an INC identifier such as INC000021095531"}
+        '401':
+          description: Требуется Bearer JWT.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                authRequired:
+                  summary: Нет Bearer JWT
+                  value: {"code": "HUMAN_AUTH_REQUIRED", "message": "Human access token is required"}
+        '403':
+          description: Нет локального допуска или заявлен чужой автор.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                coordinatorAccessDenied:
+                  summary: Токен без локального допуска координатора
+                  value: {"code": "COORDINATOR_ACCESS_DENIED", "message": "Coordinator access is not granted"}
+                authorMismatch:
+                  summary: В теле заявлен чужой автор
+                  value: {"code": "INCIDENT_NOTE_AUTHOR_MISMATCH", "message": "Note author must be the authenticated coordinator"}
+        '404':
+          description: Инцидент неизвестен дашборду.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                incidentNotFound:
+                  summary: Неизвестный INC
+                  value: {"code": "INCIDENT_NOT_FOUND", "message": "Incident INC000021099999 not found"}
+    get:
+      operationId: listIncidentNotes
+      security: [{coordinatorBearer: []}]
+      summary: История заметок INC (KAN-43)
+      description: |
+        Заметки одного INC в порядке возрастания `eventSeq`, по страницам: `afterEventSeq` —
+        курсор (`lastEventSeq` предыдущей страницы), `limit` — размер страницы (1-100).
+        Следующая смена видит все заметки с авторами и временами наблюдения; параллельные
+        заметки с одной отметкой времени получают разные `eventSeq` и помещаются в один ответ.
+        INC, исчезнувший из источника, остаётся читаемым; неизвестный дашборду INC — `404`.
+      parameters:
+        - {name: incidentId, in: path, required: true, schema: {$ref: '#/components/schemas/IncidentId'}}
+        - name: afterEventSeq
+          in: query
+          required: false
+          description: 'Курсор: вернуть заметки с `eventSeq > afterEventSeq`.'
+          schema:
+            type: integer
+            format: int64
+            minimum: 0
+            default: 0
+        - name: limit
+          in: query
+          required: false
+          description: Размер страницы, 1-100.
+          schema:
+            type: integer
+            format: int32
+            minimum: 1
+            maximum: 100
+            default: 100
+      responses:
+        '200':
+          description: 'Страница истории заметок; `lastEventSeq` — следующий курсор.'
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/IncidentNotesPage'
+              examples:
+                twoCoordinators:
+                  summary: 'Две заметки двух координаторов с одной отметкой времени (fixture notes-two-coordinators)'
+                  x-fixture: notes-two-coordinators
+                  value:
+                    incidentId: INC000021095532
+                    notes:
+                      - noteId: 3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11
+                        incidentId: INC000021095532
+                        authorId: 7
+                        authorLogin: operator
+                        authorDisplayName: 'Dashboard Operator'
+                        observedAt: '2026-11-21T09:15:00Z'
+                        eventSeq: 44
+                        text: 'Связка восстановлена, деградация не подтверждена'
+                      - noteId: 8d1e2f0a-7b4c-4d2e-8a0f-9c3b1a2e3f45
+                        incidentId: INC000021095532
+                        authorId: 8
+                        authorLogin: reliever
+                        authorDisplayName: 'Shift Reliever'
+                        observedAt: '2026-11-21T09:15:00Z'
+                        eventSeq: 45
+                        text: 'Принято; очередь платежей под наблюдением до 18:00'
+                    hasMore: false
+                    lastEventSeq: 45
+                emptyHistory:
+                  summary: У известного INC заметок ещё нет
+                  value:
+                    incidentId: INC000021095539
+                    notes: []
+                    hasMore: false
+                    lastEventSeq: 0
+        '400':
+          description: Некорректный курсор или размер страницы.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                invalidCursor:
+                  summary: afterEventSeq отрицательный
+                  value: {"code": "INVALID_EVENT_SEQ", "message": "afterEventSeq/sinceEventSeq must be a non-negative 64-bit integer"}
+                invalidLimit:
+                  summary: limit вне 1-100
+                  value: {"code": "INVALID_LIMIT", "message": "limit must be between 1 and 100"}
+        '401':
+          description: Требуется Bearer JWT.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                authRequired:
+                  summary: Нет Bearer JWT
+                  value: {"code": "HUMAN_AUTH_REQUIRED", "message": "Human access token is required"}
+        '404':
+          description: Инцидент неизвестен дашборду.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/ErrorResponse'
+              examples:
+                incidentNotFound:
+                  summary: Неизвестный INC
+                  value: {"code": "INCIDENT_NOT_FOUND", "message": "Incident INC000021099999 not found"}
 components:
   securitySchemes:
     coordinatorBearer:
@@ -3403,10 +3617,13 @@ components:
               current: {}
         details:
           type: object
-          description: Данные локального события. DEADLINE_APPROACHING передаёт deadline и ruleVersion.
+          description: Данные локального события. NOTE_ADDED содержит noteId, authorId и text.
           properties:
             deadline: {$ref: '#/components/schemas/UtcInstant'}
             ruleVersion: {type: integer, format: int64, minimum: 1}
+            noteId: {type: string, format: uuid}
+            authorId: {type: integer, format: int64, minimum: 1}
+            text: {type: string, minLength: 1, maxLength: 4000}
     DeadlineWarningRule:
       type: object
       required: [thresholdSeconds, version]
@@ -4248,4 +4465,95 @@ components:
             - string
             - 'null'
           description: 'Значение атрибута `errorCode`, заданное и равное в обеих записях.'
+      additionalProperties: false
+    CreateIncidentNoteRequest:
+      type: object
+      description: 'Заметка смены (KAN-43): текст обязателен; `observedAt` — необязательное время наблюдения (по умолчанию текущее время сервера); `authorId` — необязательное эхо локального идентификатора координатора, при несовпадении с автором токена запись отвергается целиком.'
+      required:
+        - text
+      properties:
+        text:
+          type: string
+          minLength: 1
+          maxLength: 4000
+          description: 'Текст заметки: 1-4000 символов, не только пробелы.'
+        observedAt:
+          anyOf:
+            - $ref: '#/components/schemas/UtcInstant'
+            - type: 'null'
+          description: 'Время наблюдения; опущено — текущее время сервера.'
+        authorId:
+          type:
+            - integer
+            - 'null'
+          format: int64
+          description: 'Локальный идентификатор координатора из `GET /api/me`; при передаче должен совпадать с автором токена.'
+      additionalProperties: false
+    IncidentNote:
+      type: object
+      description: 'Сохранённая заметка (KAN-43): автор всегда из проверенного токена, `eventSeq` — позиция события в общей хронологии KAN-28; опубликованный `revision` снимка ITSM заметкой не меняется.'
+      required:
+        - noteId
+        - incidentId
+        - authorId
+        - authorLogin
+        - authorDisplayName
+        - observedAt
+        - eventSeq
+        - text
+      properties:
+        noteId:
+          type: string
+          minLength: 1
+          description: 'Стабильный идентификатор заметки; он же ключ дедупликации события записи.'
+        incidentId:
+          $ref: '#/components/schemas/IncidentId'
+        authorId:
+          type: integer
+          format: int64
+          description: 'Локальный идентификатор автора заметки.'
+        authorLogin:
+          type: string
+          minLength: 1
+          description: 'Логин автора из локального допуска координатора.'
+        authorDisplayName:
+          type: string
+          minLength: 1
+          description: 'Отображаемое имя автора из локального допуска координатора.'
+        observedAt:
+          $ref: '#/components/schemas/UtcInstant'
+        eventSeq:
+          type: integer
+          format: int64
+          minimum: 0
+          maximum: 9223372036854775807
+          description: 'Позиция события заметки в общей последовательности хронологии KAN-28; растёт независимо от `revision` снимка.'
+        text:
+          type: string
+          minLength: 1
+      additionalProperties: false
+    IncidentNotesPage:
+      type: object
+      description: 'Одна страница истории заметок INC (KAN-43), в порядке возрастания `eventSeq`.'
+      required:
+        - incidentId
+        - notes
+        - hasMore
+        - lastEventSeq
+      properties:
+        incidentId:
+          $ref: '#/components/schemas/IncidentId'
+        notes:
+          type: array
+          description: 'Заметки с `eventSeq` больше курсора, в порядке возрастания `eventSeq`.'
+          items:
+            $ref: '#/components/schemas/IncidentNote'
+        hasMore:
+          type: boolean
+          description: 'Есть ли заметки за пределами страницы.'
+        lastEventSeq:
+          type: integer
+          format: int64
+          minimum: 0
+          description: 'Наибольший `eventSeq` страницы или курсор запроса при пустой странице; передаётся обратно как следующий курсор.'
       additionalProperties: false
