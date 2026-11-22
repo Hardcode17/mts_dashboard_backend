@@ -2178,6 +2178,119 @@ paths:
                 forbidden:
                   summary: Пользователь не участвовал в маршрутизации
                   value: {code: COORDINATION_REDIRECT_FORBIDDEN, message: Coordination task is not available to this coordinator}
+  /api/dashboard/shift-handovers:
+    get:
+      operationId: getShiftHandovers
+      summary: Пакеты передачи смены (KAN-87)
+      security: [{coordinatorBearer: []}]
+      responses:
+        '200':
+          description: Личные входящие и исходящие передачи, свои задачи и доступные коллеги.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [recipients, owned, incoming, outgoing]
+                properties:
+                  recipients:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name]
+                      properties:
+                        id: {type: integer, format: int64}
+                        name: {type: string}
+                  owned:
+                    type: array
+                    items: {$ref: '#/components/schemas/ShiftHandoverItem'}
+                  incoming:
+                    type: array
+                    items: {$ref: '#/components/schemas/ShiftHandoverBatch'}
+                  outgoing:
+                    type: array
+                    items: {$ref: '#/components/schemas/ShiftHandoverBatch'}
+              examples:
+                initial:
+                  summary: Свои задачи и доступные координаторы
+                  value:
+                    recipients: [{id: 4, name: 'Дежурный второй смены'}]
+                    owned: [{taskId: 8, incidentId: INC000000000008, priority: 4, deadline: '2026-11-21T17:00:00Z', title: 'Недоступность сервиса', team: 'Команда сервиса', situationKey: null, claimedAt: null, available: true}]
+                    incoming: []
+                    outgoing: []
+    post:
+      operationId: createShiftHandover
+      summary: Вручную предложить свои задачи следующему координатору (KAN-87)
+      description: Повтор того же requestId и содержимого возвращает существующий пакет. Владелец сохраняется до взятия получателем.
+      security: [{coordinatorBearer: []}]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [requestId, recipientId, taskIds]
+              properties:
+                requestId: {type: string, format: uuid}
+                recipientId: {type: integer, format: int64, minimum: 1}
+                taskIds:
+                  type: array
+                  minItems: 1
+                  maxItems: 1000
+                  items: {type: integer, format: int64, minimum: 1}
+                summary: {type: string, maxLength: 2000}
+                situationKeys:
+                  type: object
+                  description: Ключи — ID задач из taskIds. Задачи с одним значением получатель берёт одной командой.
+                  additionalProperties: {type: string, minLength: 1, maxLength: 140}
+            examples:
+              selectedSituation:
+                summary: Два инцидента одной ситуации передаются вместе
+                value: {requestId: '27d345d1-22ec-4e31-8c79-9c5b12f1fa28', recipientId: 4, taskIds: [8, 9], summary: 'Проверить восстановление со сменой', situationKeys: {'8': 'outage-a', '9': 'outage-a'}}
+      responses:
+        '200':
+          description: Идентификатор передачи.
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [id]
+                properties:
+                  id: {type: integer, format: int64}
+              examples:
+                created:
+                  summary: Номер пакета передачи
+                  value: {id: 24}
+        '400':
+          description: Некорректный пакет.
+        '403':
+          description: Недоступный получатель или группа задачи.
+        '409':
+          description: Задача изменилась, уже передана или requestId использован с другим пакетом.
+  '/api/dashboard/shift-handovers/{id}/tasks/{task}/claim':
+    post:
+      operationId: claimShiftHandover
+      summary: Явно взять предложенную ситуацию (KAN-87)
+      description: Получатель получает все открытые задачи того же ключа ситуации атомарно. Повтор принятого запроса возвращает 200.
+      security: [{coordinatorBearer: []}]
+      parameters:
+        - {name: id, in: path, required: true, schema: {type: integer, format: int64}}
+        - {name: task, in: path, required: true, schema: {type: integer, format: int64}}
+      responses:
+        '200':
+          description: Ситуация взята в работу.
+        '403':
+          description: Пользователь не является разрешённым получателем.
+        '404':
+          description: Запись задачи в передаче отсутствует.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                itemMissing:
+                  summary: Такой задачи в передаче нет
+                  value: {code: SHIFT_HANDOVER_NOT_FOUND, message: Shift handover item was not found}
+        '409':
+          description: Одна из задач закрылась или сменила владельца.
   /api/dashboard/notification-connections:
     get:
       operationId: listNotificationConnections
@@ -3623,6 +3736,39 @@ components:
       required: true
       schema: {type: integer, format: int64, minimum: 1}
   schemas:
+    ShiftHandoverBatch:
+      type: object
+      required: [id, senderId, senderName, recipientId, recipientName, createdAt, summary, items]
+      properties:
+        id: {type: integer, format: int64}
+        senderId: {type: integer, format: int64}
+        senderName: {type: string}
+        recipientId: {type: integer, format: int64}
+        recipientName: {type: string}
+        createdAt: {$ref: '#/components/schemas/UtcInstant'}
+        summary: {type: string}
+        items:
+          type: array
+          items: {$ref: '#/components/schemas/ShiftHandoverItem'}
+    ShiftHandoverItem:
+      type: object
+      required: [taskId, incidentId, priority, deadline, title, team, situationKey, claimedAt, available]
+      properties:
+        taskId: {type: integer, format: int64}
+        incidentId: {type: string}
+        priority: {type: integer}
+        deadline:
+          anyOf:
+            - {$ref: '#/components/schemas/UtcInstant'}
+            - {type: 'null'}
+        title: {type: string}
+        team: {type: [string, 'null']}
+        situationKey: {type: [string, 'null']}
+        claimedAt:
+          anyOf:
+            - {$ref: '#/components/schemas/UtcInstant'}
+            - {type: 'null'}
+        available: {type: boolean}
     CoordinationTaskAssignment:
       type: object
       required: [assignmentId, groupId, groupName, status, assignedByUserId, assignedAt, endedAt, redirectedByUserId, redirectReason]
