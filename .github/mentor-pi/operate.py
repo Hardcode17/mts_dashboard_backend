@@ -36,8 +36,16 @@ def operate(action):
     rows = {r['id']: r for r in mock_request('/itsm_incident')}
     if DELIVERY not in rows:
         raise RuntimeError('The existing mentor delivery is missing')
-    if action != 'check':
-        front_image = docker('inspect', '-f', '{{.Image}}', service_id('frontend'))
+    front_image = docker('inspect', '-f', '{{.Image}}', service_id('frontend'))
+    def snapshot(operation):
+        mount = mock + ':ro' if operation == 'check' else mock
+        docker('run', '--rm', '-i', '--network', 'none', '--user', '10001:10001',
+               '--volumes-from', mount, '--entrypoint', 'node', front_image, '--input-type=module',
+               '-', operation, '/var/lib/itsm-mock/snapshot.json', '/fixtures/character_problems.json',
+               data=Path(__file__).with_name('snapshot.mjs').read_text())
+    if action == 'check':
+        snapshot('check')
+    else:
         # A single runner owns this operation. Stop writers before reading their persisted state.
         if mock_request('/api/mock/status')['pendingVersion'] is not None:
             raise RuntimeError('ITSM is delivering another snapshot; retry in a few seconds')
@@ -51,10 +59,7 @@ def operate(action):
                 raise RuntimeError('The critical number belongs to another source')
         try:
             docker('stop', '-t', '30', mock)
-            docker('run', '--rm', '-i', '--network', 'none', '--user', '10001:10001',
-                   '--volumes-from', mock, '--entrypoint', 'node', front_image, '--input-type=module',
-                   '-', action, '/var/lib/itsm-mock/snapshot.json', '/fixtures/character_problems.json',
-                   data=Path(__file__).with_name('snapshot.mjs').read_text())
+            snapshot(action)
         finally:
             docker('start', mock)
         for _ in range(45):
