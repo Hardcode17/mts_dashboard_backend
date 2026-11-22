@@ -4,6 +4,7 @@ import os
 from pathlib import Path
 import subprocess
 import time
+from urllib.parse import urlsplit
 from urllib.request import Request, urlopen
 
 mentor = Path(".stand-sources/data/docs/mentor-demo/pi")
@@ -27,13 +28,21 @@ for line in Path(os.environ["BACKEND_ENV_FILE"]).read_text().splitlines():
         break
 else:
     raise SystemExit("Stand coordinator configuration is missing")
+port = os.environ.get("FRONTEND_PORT", "8080")
+issuer = os.environ["STAND_KEYCLOAK_URL"].rstrip("/")
 auth = subprocess.run(["bash", "scripts/fetch-human-token.sh"], capture_output=True, text=True, env={
     **os.environ, "DASHBOARD_TEST_USERNAME": "coordinator", "DASHBOARD_TEST_PASSWORD": password,
-    "KEYCLOAK_PUBLIC_URL": os.environ["STAND_KEYCLOAK_URL"],
+    "KEYCLOAK_PUBLIC_URL": issuer,
+    "KEYCLOAK_LOOPBACK_URL": f"http://localhost:{port}" + urlsplit(issuer).path,
     "DASHBOARD_REDIRECT_URI": os.environ["STAND_FRONTEND_URL"].rstrip("/") + "/auth/callback",
 })
 if auth.returncode:
-    raise SystemExit("Stand coordinator sign-in failed")
+    # Only report the stage, never a provider response body, URL with a code, or JWT.
+    if "registered callback" in auth.stderr:
+        raise SystemExit("Keycloak accepted the login request but did not issue a coordinator authorization code")
+    if "Token error" in auth.stderr:
+        raise SystemExit("Keycloak did not exchange the coordinator code for a token")
+    raise SystemExit("Could not complete the coordinator login form via the Pi frontend")
 headers = {"Authorization": "Bearer " + auth.stdout.strip()}
 origin = "http://127.0.0.1:" + os.environ.get("FRONTEND_PORT", "8080")
 
