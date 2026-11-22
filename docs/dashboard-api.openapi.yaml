@@ -2043,6 +2043,126 @@ paths:
                 cookieAuthRequired:
                   summary: Нет сессии интерфейса
                   value: {"code": "AUTH_REQUIRED", "message": "Authentication is required"}
+  '/api/dashboard/coordination-tasks/{taskId}/redirect':
+    post:
+      operationId: redirectCoordinationTask
+      security: [{coordinatorBearer: []}]
+      summary: Перенаправить открытую задачу в другую группу (KAN-44)
+      description: |
+        Владелец из исходной группы указывает причину, группу назначения и ID действующего
+        назначения. Для первого перенаправления из общего пула передаётся 0 и указывается группа
+        владельца. Задача остаётся открытой, новый владелец берёт её вручную.
+      parameters:
+        - {$ref: '#/components/parameters/CoordinationTaskId'}
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [sourceGroupId, targetGroupId, expectedAssignmentId, reason]
+              properties:
+                sourceGroupId: {type: integer, format: int64, minimum: 1}
+                targetGroupId: {type: integer, format: int64, minimum: 1}
+                expectedAssignmentId: {type: integer, format: int64, minimum: 0}
+                reason: {type: string, minLength: 1, maxLength: 1000}
+            examples:
+              redirect:
+                summary: Передача из общего пула
+                value: {sourceGroupId: 1, targetGroupId: 2, expectedAssignmentId: 0, reason: Передача следующей смене}
+      responses:
+        '200':
+          description: Активное назначение на новую группу.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/CoordinationTaskAssignment'}
+              examples:
+                assigned:
+                  summary: Задача в очереди новой группы
+                  value: {assignmentId: 2, groupId: 2, groupName: Вторая смена, status: assigned, assignedByUserId: 10, assignedAt: '2026-11-21T12:00:00Z', endedAt: null, redirectedByUserId: null, redirectReason: null}
+        '400':
+          description: Некорректный запрос или группа назначения.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                invalid:
+                  summary: Группа назначения недоступна
+                  value: {code: COORDINATION_REDIRECT_INVALID, message: Invalid coordination task redirect}
+        '401':
+          description: Требуется токен координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                missing:
+                  summary: Токен отсутствует
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: Недостаточно прав для перенаправления.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                forbidden:
+                  summary: Действие недоступно координатору
+                  value: {code: COORDINATION_REDIRECT_FORBIDDEN, message: Coordination task is not available to this coordinator}
+        '404':
+          description: Открытая задача не найдена.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                notOpen:
+                  summary: Задача уже закрыта
+                  value: {code: COORDINATION_TASK_NOT_OPEN, message: Open coordination task not found}
+        '409':
+          description: Действующее назначение сменилось.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                changed:
+                  summary: Повтор запроса со старым назначением
+                  value: {code: COORDINATION_ASSIGNMENT_CHANGED, message: Coordination assignment has changed}
+  '/api/dashboard/coordination-tasks/{taskId}/assignments':
+    get:
+      operationId: listCoordinationTaskAssignments
+      security: [{coordinatorBearer: []}]
+      summary: История перенаправлений задачи (KAN-44)
+      parameters:
+        - {$ref: '#/components/parameters/CoordinationTaskId'}
+      responses:
+        '200':
+          description: Назначения от первого к последнему.
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/CoordinationTaskAssignment'}
+              examples:
+                history:
+                  summary: Прежнее назначение с причиной перенаправления
+                  value:
+                    - {assignmentId: 1, groupId: 1, groupName: Первая смена, status: redirected, assignedByUserId: 10, assignedAt: '2026-11-21T12:00:00Z', endedAt: '2026-11-21T12:00:00Z', redirectedByUserId: 10, redirectReason: Передача следующей смене}
+        '401':
+          description: Требуется токен координатора.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                missing:
+                  summary: Токен отсутствует
+                  value: {code: HUMAN_AUTH_REQUIRED, message: Human access token is required}
+        '403':
+          description: История недоступна этому координатору.
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/ErrorResponse'}
+              examples:
+                forbidden:
+                  summary: Пользователь не участвовал в маршрутизации
+                  value: {code: COORDINATION_REDIRECT_FORBIDDEN, message: Coordination task is not available to this coordinator}
   /api/dashboard/notification-connections:
     get:
       operationId: listNotificationConnections
@@ -2946,7 +3066,29 @@ components:
         Предлагается, не развёрнуто: JWT Keycloak для машинного мониторинга.
         Проверяются `iss`, подпись JWKS, `exp`, `aud`; остальное — как `machineBearer` в
         `itsm-ingest.openapi.yaml`.
+  parameters:
+    CoordinationTaskId:
+      name: taskId
+      in: path
+      required: true
+      schema: {type: integer, format: int64, minimum: 1}
   schemas:
+    CoordinationTaskAssignment:
+      type: object
+      required: [assignmentId, groupId, groupName, status, assignedByUserId, assignedAt, endedAt, redirectedByUserId, redirectReason]
+      properties:
+        assignmentId: {type: integer, format: int64}
+        groupId: {type: integer, format: int64}
+        groupName: {type: string}
+        status: {type: string, enum: [assigned, redirected, completed]}
+        assignedByUserId: {type: integer, format: int64}
+        assignedAt: {$ref: '#/components/schemas/UtcInstant'}
+        endedAt:
+          anyOf:
+            - {$ref: '#/components/schemas/UtcInstant'}
+            - {type: 'null'}
+        redirectedByUserId: {type: [integer, 'null'], format: int64}
+        redirectReason: {type: [string, 'null'], maxLength: 1000}
     NotificationChannel:
       type: string
       enum: [email, sms, push, telegram, mattermost, max, mts_link, mobile_hub, mts_notifica]
