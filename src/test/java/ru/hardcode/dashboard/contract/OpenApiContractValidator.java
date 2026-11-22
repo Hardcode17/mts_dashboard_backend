@@ -590,6 +590,10 @@ final class OpenApiContractValidator {
 		canonical.put("listIncidentNotes", "GET " + DASHBOARD_NOTES);
 		canonical.put("launchIncidentInvestigation", "POST " + INVESTIGATION);
 		canonical.put("getIncidentInvestigation", "GET " + INVESTIGATION + "/{runId}");
+		String handovers = "/api/dashboard/shift-handovers";
+		canonical.put("getShiftHandovers", "GET " + handovers);
+		canonical.put("createShiftHandover", "POST " + handovers);
+		canonical.put("claimShiftHandover", "POST " + handovers + "/{id}/tasks/{task}/claim");
 		canonical.forEach((operationId, route) -> {
 			List<String> found = routes.getOrDefault(operationId, List.of());
 			if (!found.equals(List.of(route))) {
