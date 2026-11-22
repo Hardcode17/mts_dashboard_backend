@@ -1,0 +1,28 @@
+# KAN-40: real Spring AI model calls for incident investigations. Enable together with a
+# base profile and evidence: SPRING_PROFILES_ACTIVE=demo,evidence,ai. Without this profile no
+# chat model exists and every launch is refused with an explicit AI_MODEL_NOT_CONFIGURED
+# status; the incident card and the evidence tools keep working.
+spring:
+  ai:
+    model:
+      chat: deepseek
+      embedding: none
+    vectorstore:
+      type: none
+    mcp:
+      client:
+        enabled: false
+      server:
+        enabled: false
+    chat:
+      client:
+        enabled: false
+        tool-search-advisor:
+          enabled: false
+    deepseek:
+      base-url: ${DASHBOARD_AI_DEEPSEEK_BASE_URL:https://api.deepseek.com}
+      api-key: ${DASHBOARD_AI_DEEPSEEK_API_KEY:}
+      chat:
+        options:
+          model: ${DASHBOARD_AI_DEEPSEEK_CHAT_MODEL:deepseek-chat}
+          temperature: ${DASHBOARD_AI_DEEPSEEK_TEMPERATURE:0.1}

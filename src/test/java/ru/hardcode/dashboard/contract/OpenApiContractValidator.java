@@ -72,6 +72,7 @@ final class OpenApiContractValidator {
 	private static final String DASHBOARD_EVENTS = "/api/dashboard/events";
 	private static final String DASHBOARD_ACK = "/api/dashboard/events/ack";
 	private static final String DASHBOARD_NOTES = "/api/dashboard/incidents/{incidentId}/notes";
+	private static final String INVESTIGATION = "/api/incidents/{incidentId}/investigations";
 
 	private final Path docs;
 	private final PublishedHost published;
@@ -587,6 +588,8 @@ final class OpenApiContractValidator {
 		canonical.put("listCoordinationTaskAssignments", "GET /api/dashboard/coordination-tasks/{taskId}/assignments");
 		canonical.put("addIncidentNote", "POST " + DASHBOARD_NOTES);
 		canonical.put("listIncidentNotes", "GET " + DASHBOARD_NOTES);
+		canonical.put("launchIncidentInvestigation", "POST " + INVESTIGATION);
+		canonical.put("getIncidentInvestigation", "GET " + INVESTIGATION + "/{runId}");
 		canonical.forEach((operationId, route) -> {
 			List<String> found = routes.getOrDefault(operationId, List.of());
 			if (!found.equals(List.of(route))) {
