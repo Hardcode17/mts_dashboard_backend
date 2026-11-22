@@ -9,10 +9,12 @@ the deployed frontend origin, especially its RP-initiated logout redirect.
 import json
 import os
 import sys
+import time
 import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+from typing import Any
 
 
 def env_file_values(path: str) -> dict[str, str]:
@@ -27,11 +29,36 @@ def env_file_values(path: str) -> dict[str, str]:
 
 
 def request(url: str, method: str = "GET", body: bytes | None = None,
-            headers: dict[str, str] | None = None) -> dict:
+            headers: dict[str, str] | None = None) -> Any:
     request_obj = urllib.request.Request(url, data=body, method=method,
                                          headers=headers or {})
-    with urllib.request.urlopen(request_obj, timeout=15) as response:
-        return json.loads(response.read())
+    last_error: Exception | None = None
+    for attempt in range(10):
+        try:
+            with urllib.request.urlopen(request_obj, timeout=15) as response:
+                raw = response.read()
+                if not raw.strip():
+                    raise RuntimeError(f"Keycloak returned an empty response from {url}")
+                try:
+                    return json.loads(raw)
+                except json.JSONDecodeError as error:
+                    preview = raw[:300].decode("utf-8", errors="replace")
+                    raise RuntimeError(
+                        f"Keycloak returned non-JSON from {url}: {preview!r}"
+                    ) from error
+        except urllib.error.HTTPError as error:
+            raw = error.read()
+            preview = raw[:300].decode("utf-8", errors="replace")
+            if error.code not in {502, 503, 504}:
+                raise RuntimeError(
+                    f"Keycloak returned HTTP {error.code} from {url}: {preview!r}"
+                ) from error
+            last_error = error
+        except (urllib.error.URLError, TimeoutError, RuntimeError) as error:
+            last_error = error
+        if attempt < 9:
+            time.sleep(2)
+    raise RuntimeError(f"Keycloak admin API is unavailable: {last_error}")
 
 
 def main() -> None:
@@ -59,7 +86,7 @@ def main() -> None:
         f"{base}/admin/realms/dashboard/clients?clientId=dashboard-web",
         headers=auth,
     )
-    if len(clients) != 1:
+    if not isinstance(clients, list) or len(clients) != 1:
         raise RuntimeError(f"Expected exactly one dashboard-web client, got {len(clients)}")
 
     client = clients[0]
