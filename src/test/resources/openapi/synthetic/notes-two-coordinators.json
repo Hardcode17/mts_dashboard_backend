@@ -1,0 +1,27 @@
+{
+  "incidentId": "INC000021095532",
+  "notes": [
+    {
+      "noteId": "3f2c1b9e-6a43-4c1a-9a37-0e5d7b2d4c11",
+      "incidentId": "INC000021095532",
+      "authorId": 7,
+      "authorLogin": "operator",
+      "authorDisplayName": "Dashboard Operator",
+      "observedAt": "2026-11-21T09:15:00Z",
+      "eventSeq": 44,
+      "text": "Связка восстановлена, деградация не подтверждена"
+    },
+    {
+      "noteId": "8d1e2f0a-7b4c-4d2e-8a0f-9c3b1a2e3f45",
+      "incidentId": "INC000021095532",
+      "authorId": 8,
+      "authorLogin": "reliever",
+      "authorDisplayName": "Shift Reliever",
+      "observedAt": "2026-11-21T09:15:00Z",
+      "eventSeq": 45,
+      "text": "Принято; очередь платежей под наблюдением до 18:00"
+    }
+  ],
+  "hasMore": false,
+  "lastEventSeq": 45
+}
